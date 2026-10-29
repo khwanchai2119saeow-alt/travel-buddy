@@ -5,7 +5,8 @@ import { db, newUid, type Place, type PlaceKind } from '@/lib/db';
 import { currentPosition, parseLatLng, searchPlace, type GeoResult } from '@/lib/geo';
 import { shrinkImage } from '@/lib/image';
 import { activeCountry, dayLabel } from '@/lib/format';
-import { Modal, useBlobUrl } from './ui';
+import { Modal } from './ui';
+import { MAX_PLACE_PHOTOS, placePhotos } from '@/lib/photos';
 
 interface Props {
   tripUid: string;
@@ -30,7 +31,8 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
   const [checkIn, setCheckIn] = useState('');
   const [lat, setLat] = useState('');
   const [lng, setLng] = useState('');
-  const [photo, setPhoto] = useState<Blob | null | undefined>(undefined); // undefined = ไม่เปลี่ยน, null = ลบ
+  const [photos, setPhotos] = useState<Blob[] | undefined>(undefined); // undefined = ไม่เปลี่ยน (ใช้รูปเดิม)
+  const [adding, setAdding] = useState(false);
   const [q, setQ] = useState('');
   const [link, setLink] = useState('');
   const [results, setResults] = useState<GeoResult[]>([]);
@@ -49,7 +51,7 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
     setCheckIn(initial?.checkIn ?? '');
     setLat(initial ? String(initial.lat) : '');
     setLng(initial ? String(initial.lng) : '');
-    setPhoto(undefined);
+    setPhotos(undefined);
     setQ('');
     setLink('');
     setResults([]);
@@ -66,8 +68,15 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
     }
   }, [picked?.seq]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const previewBlob = photo === undefined ? initial?.photo : photo ?? undefined;
-  const previewUrl = useBlobUrl(previewBlob);
+  // รูปที่จะบันทึก: แก้แล้วใช้รายการใหม่ ไม่งั้นใช้ของเดิม
+  const current = photos ?? (initial ? placePhotos(initial) : []);
+  const [thumbs, setThumbs] = useState<string[]>([]);
+  useEffect(() => {
+    const u = current.map((b) => URL.createObjectURL(b));
+    setThumbs(u);
+    return () => u.forEach((x) => URL.revokeObjectURL(x));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photos, initial]);
 
   async function doSearch() {
     if (!q.trim()) return;
@@ -115,14 +124,27 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
     setBusy(false);
   }
 
-  async function onPhoto(file?: File | null) {
-    if (!file) return;
-    try {
-      setPhoto(await shrinkImage(file, 1000, 0.8));
-    } catch {
-      setMsg('ใช้รูปนี้ไม่ได้');
+  /** เพิ่มได้ทีละหลายรูป (ย่อก่อนเก็บ ~1000px) สูงสุด MAX_PLACE_PHOTOS รูป */
+  async function addPhotos(files?: FileList | null) {
+    if (!files?.length) return;
+    const room = MAX_PLACE_PHOTOS - current.length;
+    if (room <= 0) return setMsg(`ใส่ได้สูงสุด ${MAX_PLACE_PHOTOS} รูปต่อสถานที่`);
+    setAdding(true);
+    const added: Blob[] = [];
+    for (const f of Array.from(files).slice(0, room)) {
+      try {
+        added.push(await shrinkImage(f, 1000, 0.8));
+      } catch {
+        setMsg('บางรูปใช้ไม่ได้ ข้ามไป');
+      }
     }
+    if (files.length > room) setMsg(`ใส่ได้สูงสุด ${MAX_PLACE_PHOTOS} รูป — เพิ่มแค่ ${room} รูปแรก`);
+    setPhotos([...current, ...added]);
+    setAdding(false);
   }
+
+  const removePhoto = (i: number) => setPhotos(current.filter((_, j) => j !== i));
+  const makeCover = (i: number) => setPhotos([current[i], ...current.filter((_, j) => j !== i)]);
 
   async function save() {
     const la = parseFloat(lat);
@@ -144,7 +166,10 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
     };
     if (initial?.id) {
       const changes: Partial<Place> = { ...base };
-      if (photo !== undefined) changes.photo = photo ?? undefined;
+      if (photos !== undefined) {
+        changes.photos = photos;
+        changes.photo = undefined;
+      }
       await db.places.update(initial.id, changes);
     } else {
       const same = await db.places.where('tripUid').equals(tripUid).filter((p) => p.day === day).toArray();
@@ -155,7 +180,7 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
         tripUid,
         order,
         visited: false,
-        photo: photo ?? undefined,
+        photos: photos ?? [],
         createdAt: Date.now(),
       });
     }
@@ -216,18 +241,37 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
         </div>
 
         <div>
-          <label className="label">รูปตัวอย่าง (จะโชว์ในป๊อปอัปบนแผนที่)</label>
-          {previewUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={previewUrl} alt="ตัวอย่างรูป" className="mb-2 h-36 w-full rounded-2xl object-cover" />
+          <label className="label">
+            รูปสถานที่ ({current.length}/{MAX_PLACE_PHOTOS}) — เลื่อนดูได้ในป๊อปอัปบนแผนที่ รูปแรกเป็นรูปปก
+          </label>
+          {thumbs.length > 0 && (
+            <div className="hscroll mb-2">
+              {thumbs.map((u, i) => (
+                <div key={u} className="relative h-24 w-24 shrink-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={u} alt={`รูปที่ ${i + 1}`} className="h-full w-full rounded-xl object-cover" />
+                  <button
+                    className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-black/60 text-[13px] text-white"
+                    onClick={() => removePhoto(i)}
+                    aria-label={`ลบรูปที่ ${i + 1}`}
+                  >
+                    ✕
+                  </button>
+                  {i === 0 ? (
+                    <span className="absolute bottom-1 left-1 rounded-full bg-ios-blue px-1.5 text-[11px] font-semibold text-white">ปก</span>
+                  ) : (
+                    <button className="absolute bottom-1 left-1 rounded-full bg-black/55 px-1.5 text-[11px] text-white" onClick={() => makeCover(i)}>
+                      ตั้งเป็นปก
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
           )}
-          <div className="flex gap-2">
-            <label className="btn-ghost cursor-pointer">
-              📷 เลือก/ถ่ายรูป
-              <input type="file" accept="image/*" className="hidden" onChange={(e) => onPhoto(e.target.files?.[0])} />
-            </label>
-            {previewUrl && <button className="btn-ghost" onClick={() => setPhoto(null)}>ลบรูป</button>}
-          </div>
+          <label className={`btn-ghost cursor-pointer ${current.length >= MAX_PLACE_PHOTOS ? 'pointer-events-none opacity-40' : ''}`}>
+            {adding ? 'กำลังเพิ่มรูป…' : '📷 เพิ่มรูป (เลือกได้หลายรูป)'}
+            <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { addPhotos(e.target.files); e.target.value = ''; }} />
+          </label>
         </div>
 
         <div className="space-y-2 rounded-2xl bg-ios-fill p-3">

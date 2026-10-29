@@ -1,12 +1,12 @@
 'use client';
 import dynamic from 'next/dynamic';
 import { useMemo, useRef, useState } from 'react';
-import { db, type Place } from '@/lib/db';
+import { db, saveSettings, type Place } from '@/lib/db';
 import { useStats, useTripPlaces } from '@/lib/stats';
 import { countryOf } from '@/lib/country';
 import { dayLabel, fmtCur, fmtThb0, todayDay } from '@/lib/format';
 import { seedSamplePlaces, removeSamplePlaces } from '@/lib/seed';
-import { EmptyState, PageHeader } from '@/components/ui';
+import { EmptyState, PageHeader, Toggle } from '@/components/ui';
 import PlaceModal from '@/components/PlaceModal';
 import PlaceForm from '@/components/PlaceForm';
 import WeatherCard from '@/components/WeatherCard';
@@ -31,6 +31,24 @@ export default function TripPage() {
   const [mapMsg, setMapMsg] = useState('');
   const [caching, setCaching] = useState(false);
   const [csvOpen, setCsvOpen] = useState(false);
+  const [gpsMsg, setGpsMsg] = useState('');
+
+  /** เปิดติ๊กอัตโนมัติ: ขอสิทธิ์ตำแหน่งก่อน (iPhone ถามครั้งแรก) */
+  function toggleAutoVisit(on: boolean) {
+    setGpsMsg('');
+    if (!on) return saveSettings({ autoVisit: false });
+    if (!navigator.geolocation) return setGpsMsg('เครื่องนี้ใช้ตำแหน่งไม่ได้');
+    navigator.geolocation.getCurrentPosition(
+      () => saveSettings({ autoVisit: true }),
+      (e) =>
+        setGpsMsg(
+          e.code === 1
+            ? 'ไม่ได้รับสิทธิ์ใช้ตำแหน่ง — เปิดได้ที่ แอปตั้งค่าของ iPhone → ความเป็นส่วนตัว → บริการหาตำแหน่ง → เว็บไซต์ Safari → ขณะใช้แอป'
+            : 'หาตำแหน่งไม่ได้ตอนนี้ ลองใหม่ในที่โล่ง',
+        ),
+      { enableHighAccuracy: true, timeout: 15000 },
+    );
+  }
   const mapApi = useRef<MapApi | null>(null);
   const mapWrap = useRef<HTMLDivElement>(null);
 
@@ -81,7 +99,7 @@ export default function TripPage() {
   }
 
   async function toggleVisited(p: Place) {
-    if (p.id) await db.places.update(p.id, { visited: !p.visited });
+    if (p.id) await db.places.update(p.id, { visited: !p.visited, visitedAt: p.visited ? undefined : Date.now(), visitedAuto: false });
   }
 
   async function move(p: Place, dir: -1 | 1) {
@@ -169,6 +187,16 @@ export default function TripPage() {
         )}
       </div>
       {mapMsg && <p className="px-4 pb-1 text-xs text-ios-secondary">{mapMsg}</p>}
+
+      <div className="mx-4 mb-2 flex items-center gap-3 rounded-widget bg-ios-card px-4 py-3">
+        <span className="text-xl">📍</span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[15px] font-medium">ติ๊ก “ไปแล้ว” อัตโนมัติเมื่อถึงที่หมาย</span>
+          <span className="block text-[12px] text-ios-secondary">ใช้ GPS ตอนเปิดแอป · อยู่ใกล้หมุด ~150 ม. ราว 1 นาที</span>
+        </span>
+        <Toggle on={!!settings.autoVisit} onChange={toggleAutoVisit} label="ติ๊กไปแล้วอัตโนมัติ" />
+      </div>
+      {gpsMsg && <p className="mx-4 mb-2 rounded-xl bg-ios-orange/10 p-3 text-[13px] text-ios-orange">{gpsMsg}</p>}
 
       {selectedDay > 0 && (
         <div className="px-4 pb-2">

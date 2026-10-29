@@ -5,6 +5,7 @@ import { DAY_CATS, preCat, PRE_CATS } from '@/lib/constants';
 import { useStats, useTripPlaces } from '@/lib/stats';
 import { countryOf } from '@/lib/country';
 import { computePeople } from '@/lib/people';
+import { placePhotos } from '@/lib/photos';
 import { dayDate, dayLabel, fmtCur, fmtThb, fmtThb0 } from '@/lib/format';
 import { downloadBlob, shareFile } from '@/lib/image';
 import { PageHeader, useBlobUrl } from '@/components/ui';
@@ -245,7 +246,7 @@ export default function SummaryPage() {
                 </div>
                 {list.map((p) => (
                   <div key={p.uid} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 5 }}>
-                    <Thumb blob={p.photo} />
+                    <Thumb blob={placePhotos(p)[0]} />
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 600 }}>
                         {p.kind === 'hotel' ? '🏨' : p.visited ? '✅' : '📍'} {p.title}

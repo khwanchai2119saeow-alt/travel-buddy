@@ -21,8 +21,15 @@ import { blobToDataUrl, dataUrlToBlob } from './image';
 interface PackedDaily extends Omit<DailyExpense, 'receipt' | 'id'> {
   receipt?: string;
 }
-interface PackedPlace extends Omit<Place, 'photo' | 'id'> {
-  photo?: string;
+interface PackedPlace extends Omit<Place, 'photo' | 'photos' | 'id'> {
+  photos?: string[]; // dataURL หลายรูป
+  photo?: string; // ไฟล์รุ่นเก่า (รูปเดียว)
+}
+
+/** รูปในไฟล์ → Blob (รองรับไฟล์เก่าที่มีรูปเดียว) · undefined = ไฟล์ไม่มีข้อมูลรูป */
+async function unpackPhotos(p: { photos?: string[]; photo?: string }): Promise<Blob[] | undefined> {
+  const list = p.photos ?? (p.photo ? [p.photo] : undefined);
+  return list ? Promise.all(list.map(dataUrlToBlob)) : undefined;
 }
 type Shared = Pick<AppSettings, 'nameA' | 'notes'> & { nameB?: string };
 
@@ -65,9 +72,10 @@ export async function exportAll(tripUid?: string): Promise<Blob> {
   }
   const packedPlaces: PackedPlace[] = [];
   for (const p of only(places)) {
-    const { photo, id, ...rest } = p;
+    const { photo, photos, id, ...rest } = p;
     void id;
-    packedPlaces.push({ ...rest, photo: photo ? await blobToDataUrl(photo) : undefined });
+    const all = photos?.length ? photos : photo ? [photo] : [];
+    packedPlaces.push({ ...rest, photos: await Promise.all(all.map(blobToDataUrl)) });
   }
   const file: BackupFile = {
     app: 'hokkaido-trip',
@@ -203,13 +211,14 @@ export async function importMerge(text: string, opts: { overwriteSettings: boole
   const localPlaces = new Map((await db.places.toArray()).map((x) => [x.uid, x]));
   for (const p of data.places as (Omit<PackedPlace, 'tripUid'> & { tripUid?: string })[]) {
     if (!p.uid) continue;
-    const { photo, ...rest } = p;
+    const { photo, photos, ...rest } = p;
+    const blobs = await unpackPhotos({ photo, photos });
     const cur = localPlaces.get(p.uid);
     if (!cur) {
-      await db.places.add({ ...rest, tripUid: tripOf(p), photo: photo ? await dataUrlToBlob(photo) : undefined });
+      await db.places.add({ ...rest, tripUid: tripOf(p), photos: blobs ?? [] });
       result.places++;
     } else if (newer(p.updatedAt, cur.updatedAt)) {
-      await db.places.put({ ...rest, id: cur.id, tripUid: cur.tripUid, photo: photo ? await dataUrlToBlob(photo) : cur.photo });
+      await db.places.put({ ...rest, id: cur.id, tripUid: cur.tripUid, photos: blobs ?? cur.photos ?? (cur.photo ? [cur.photo] : []) });
       result.updated++;
     }
   }

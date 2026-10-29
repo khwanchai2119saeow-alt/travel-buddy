@@ -24,6 +24,7 @@ export function useSettings(): Settings {
     ...v?.trip,
     nameA: v?.app?.nameA ?? DEFAULT_SETTINGS.nameA,
     notes: v?.app?.notes ?? '',
+    autoVisit: v?.app?.autoVisit ?? false,
     me: '',
   };
   view.members = view.members?.length ? view.members : DEFAULT_SETTINGS.members;

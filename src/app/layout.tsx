@@ -3,6 +3,7 @@ import './globals.css';
 import BottomNav from '@/components/BottomNav';
 import PwaRegister from '@/components/PwaRegister';
 import NavHistory from '@/components/NavHistory';
+import AutoVisit from '@/components/AutoVisit';
 
 const base = process.env.NEXT_PUBLIC_BASE_PATH || '';
 
@@ -35,6 +36,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <PwaRegister />
         <NavHistory />
+        <AutoVisit />
         <main className="mx-auto min-h-screen max-w-xl">{children}</main>
         <BottomNav />
       </body>

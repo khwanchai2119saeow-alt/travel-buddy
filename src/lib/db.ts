@@ -49,12 +49,13 @@ export interface AppSettings {
   notes: string; // ข้อมูลสำคัญที่อยากเก็บไว้ (เลขกรมธรรม์ เบอร์สถานทูต ฯลฯ)
   activeTrip: string; // uid ของทริปที่เปิดอยู่
   me: Record<string, string>; // ในแต่ละทริป เครื่องนี้คือสมาชิกคนไหน (tripUid → member id) — ไม่ซิงก์ไปเครื่องอื่น
+  autoVisit?: boolean; // ติ๊ก "ไปแล้ว" อัตโนมัติเมื่อถึงหมุด (GPS ขณะเปิดแอป) — เฉพาะเครื่องนี้
 }
 
 /** มุมมองที่หน้าต่าง ๆ ใช้: ทริปที่เปิดอยู่ + ค่าร่วม (ชื่อเดิม Settings เพื่อให้โค้ดเดิมใช้ต่อได้) */
-export type Settings = Omit<Trip, 'id'> & Pick<AppSettings, 'nameA' | 'notes'> & { me: string };
+export type Settings = Omit<Trip, 'id'> & Pick<AppSettings, 'nameA' | 'notes' | 'autoVisit'> & { me: string };
 
-const GLOBAL_KEYS = ['nameA', 'notes'] as const;
+const GLOBAL_KEYS = ['nameA', 'notes', 'autoVisit'] as const;
 
 /** id สมาชิกสั้น ๆ (พอสำหรับไม่ซ้ำในทริปเดียว และใส่ใน QR ได้) */
 export const newMemberId = (): string => Math.random().toString(36).slice(2, 8);
@@ -130,8 +131,11 @@ export interface Place {
   time: string;
   bookingCode: string;
   checkIn: string;
-  photo?: Blob;
+  photos?: Blob[]; // รูปสถานที่หลายรูป (รูปแรก = รูปปก) เลื่อนดูในป๊อปอัปหมุด
+  photo?: Blob; // เลิกใช้แล้ว (สมัยรูปเดียว) — v5 ย้ายเข้า photos
   visited: boolean;
+  visitedAt?: number; // เวลาที่ติ๊กว่าไปแล้ว
+  visitedAuto?: boolean; // ติ๊กอัตโนมัติจาก GPS
   sample?: boolean;
   createdAt: number;
   updatedAt?: number;
@@ -232,6 +236,19 @@ class TripDB extends Dexie {
         await tx.table('settings').put({ ...app, id: 'main', me });
       });
 
+    // v5: รูปสถานที่ได้หลายรูป — ย้ายรูปเดียวเดิม (photo) เข้า photos
+    this.version(5)
+      .stores({})
+      .upgrade(async (tx) => {
+        await tx
+          .table('places')
+          .toCollection()
+          .modify((p: Place) => {
+            if (p.photo && !p.photos?.length) p.photos = [p.photo];
+            delete p.photo;
+          });
+      });
+
     // ประทับเวลาแก้ไขอัตโนมัติ (ใช้รวมข้อมูลจากเพื่อน: รายการที่แก้ทีหลังชนะ) — ถ้าส่ง updatedAt มาเอง (ตอนนำเข้า) จะใช้ค่านั้น
     for (const t of [this.pre, this.daily, this.places] as Table<{ updatedAt?: number }, number>[]) {
       t.hook('creating', (_pk, obj) => {
@@ -320,7 +337,7 @@ export async function tripSize(uid: string): Promise<number> {
   const json = (x: unknown) => JSON.stringify(x).length;
   let n = json(pre);
   for (const d of daily) n += json({ ...d, receipt: undefined }) + (d.receipt?.size ?? 0);
-  for (const p of places) n += json({ ...p, photo: undefined }) + (p.photo?.size ?? 0);
+  for (const p of places) n += json({ ...p, photos: undefined }) + (p.photos ?? []).reduce((a, b) => a + b.size, 0);
   return n;
 }
 

@@ -138,3 +138,19 @@ export function BlobImg({ blob, alt, className }: { blob?: Blob; alt: string; cl
   // eslint-disable-next-line @next/next/no-img-element
   return <img src={url} alt={alt} className={className} />;
 }
+
+/** สวิตช์เปิด/ปิดแบบ iOS */
+export function Toggle({ on, onChange, label, disabled }: { on: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
+  return (
+    <button
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!on)}
+      className={`relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors disabled:opacity-40 ${on ? 'bg-ios-green' : 'bg-ios-fill'}`}
+    >
+      <span className={`absolute top-[2px] h-[27px] w-[27px] rounded-full bg-white shadow-[0_3px_8px_rgba(0,0,0,0.15)] transition-all ${on ? 'left-[22px]' : 'left-[2px]'}`} />
+    </button>
+  );
+}
