@@ -42,7 +42,8 @@ self.addEventListener('install', (event) => {
       for (const path of PRECACHE) assetUrls.add(new URL(path, self.registration.scope).href);
       for (const url of assetUrls) {
         try {
-          await cache.add(url);
+          // cache: 'reload' = โหลดจากเซิร์ฟเวอร์จริง ไม่ใช้สำเนาเก่าในแคชเบราว์เซอร์ (GitHub Pages แคช 10 นาที)
+          await cache.add(new Request(url, { cache: 'reload' }));
         } catch (_) {}
       }
       await self.skipWaiting();
