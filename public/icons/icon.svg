@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- ไอคอนแอป: ธงญี่ปุ่น (พื้นขาว วงกลมแดง) + เครื่องบินบินผ่าน — ต้นฉบับของ icon-*.png (สร้างใหม่ด้วย @resvg/resvg-js) -->
+  <rect width="1024" height="1024" fill="#FFFFFF"/>
+  <circle cx="512" cy="512" r="300" fill="#BC002D"/>
+  <!-- เส้นไอพ่นด้านหลังเครื่องบิน -->
+  <path d="M244 780 C 330 700, 360 660, 420 604" fill="none" stroke="#BC002D" stroke-width="18" stroke-linecap="round" stroke-dasharray="2 44" opacity="0.55"/>
+  <path d="M300 724 C 350 676, 380 646, 420 604" fill="none" stroke="#FFFFFF" stroke-width="18" stroke-linecap="round" stroke-dasharray="2 44"/>
+  <!-- เครื่องบิน (หัวชี้ขึ้นขวา) -->
+  <g transform="translate(548 476) rotate(45) scale(1.05)">
+    <path fill="#FFFFFF" d="M0 -190 C 15 -190 24 -168 24 -136 L24 -44 L182 30 L182 64 L24 22 L24 112 L74 152 L74 178 L0 158 L-74 178 L-74 152 L-24 112 L-24 22 L-182 64 L-182 30 L-24 -44 L-24 -136 C -24 -168 -15 -190 0 -190 Z"/>
+  </g>
+</svg>
