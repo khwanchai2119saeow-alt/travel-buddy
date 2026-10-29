@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/ui';
 import PriceCalc from '@/components/PriceCalc';
 import InstallHint from '@/components/InstallHint';
 import { WeatherWidget } from '@/components/WeatherCard';
+import AppIcon from '@/components/AppIcons';
 import { countryOf } from '@/lib/country';
 
 function tripStatus(tripStart: string, days: number): string {
@@ -23,11 +24,11 @@ function tripStatus(tripStart: string, days: number): string {
 }
 
 const SHORTCUTS = [
-  { href: '/scan/', label: 'สแกนใบเสร็จ', emoji: '🧾', bg: 'linear-gradient(160deg,#ff9f0a,#ff6b00)' },
-  { href: '/translate/', label: 'โชว์พนักงาน', emoji: '💬', bg: 'linear-gradient(160deg,#34c759,#1f9d45)' },
-  { href: '/summary/', label: 'สรุปทริป', emoji: '📸', bg: 'linear-gradient(160deg,#af52de,#7d33b8)' },
-  { href: '/settings/', label: 'ตั้งค่า', emoji: '⚙️', bg: 'linear-gradient(160deg,#8e8e93,#636366)' },
-];
+  { href: '/scan/', label: 'สแกนใบเสร็จ', icon: 'scan' },
+  { href: '/translate/', label: 'แปลภาษา', icon: 'translate' },
+  { href: '/summary/', label: 'สรุปทริป', icon: 'summary' },
+  { href: '/settings/', label: 'ตั้งค่า', icon: 'settings' },
+] as const;
 
 export default function HomePage() {
   const { stats, settings } = useStats();
@@ -135,11 +136,9 @@ export default function HomePage() {
         {/* ทางลัดแบบไอคอนแอป */}
         <div className="col-span-2 grid grid-cols-4 gap-3 py-1">
           {SHORTCUTS.map((s) => (
-            <Link key={s.href} href={s.href} className="flex flex-col items-center gap-1.5">
-              <span className="grid h-[60px] w-[60px] place-items-center rounded-[16px] text-[28px] shadow-sm" style={{ background: s.bg }}>
-                {s.emoji}
-              </span>
-              <span className="text-center text-[11px] leading-tight">{s.label}</span>
+            <Link key={s.href} href={s.href} className="flex flex-col items-center gap-1.5 active:opacity-70">
+              <AppIcon name={s.icon} />
+              <span className="text-center text-[12px] leading-tight">{s.label}</span>
             </Link>
           ))}
         </div>
