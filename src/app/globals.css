@@ -1,0 +1,178 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* โทนสีแบบ iOS — สว่าง/มืดตามการตั้งค่าของ iPhone */
+:root {
+  --bg: 242 242 247;
+  --card: 255 255 255;
+  --label: 0 0 0;
+  --label2: rgba(60, 60, 67, 0.6);
+  --label3: rgba(60, 60, 67, 0.3);
+  --fill: rgba(118, 118, 128, 0.12);
+  --sep: rgba(60, 60, 67, 0.29);
+  --glass: rgba(255, 255, 255, 0.72);
+  --blue: 0 122 255;
+  --red: 255 59 48;
+  --orange: 255 149 0;
+  --green: 52 199 89;
+  --indigo: 88 86 214;
+  --teal: 48 176 199;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: 0 0 0;
+    --card: 28 28 30;
+    --label: 255 255 255;
+    --label2: rgba(235, 235, 245, 0.6);
+    --label3: rgba(235, 235, 245, 0.3);
+    --fill: rgba(118, 118, 128, 0.24);
+    --sep: rgba(84, 84, 88, 0.6);
+    --glass: rgba(30, 30, 32, 0.72);
+    --blue: 10 132 255;
+    --red: 255 69 58;
+    --orange: 255 159 10;
+    --green: 48 209 88;
+    --indigo: 94 92 230;
+    --teal: 64 200 224;
+    color-scheme: dark;
+  }
+}
+
+html,
+body {
+  background: rgb(var(--bg));
+  color: rgb(var(--label));
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  /* ฟอนต์ระบบของ iPhone (SF Pro + ฟอนต์ไทยของระบบ) */
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Sukhumvit Set', 'Thonburi', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: none;
+  padding-bottom: calc(96px + env(safe-area-inset-bottom));
+}
+
+@layer components {
+  .card {
+    @apply rounded-widget bg-ios-card p-4;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-full bg-ios-blue px-5 py-2.5 text-[15px] font-semibold text-white transition active:scale-[.97] active:opacity-80 disabled:opacity-40;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-full bg-ios-fill px-5 py-2.5 text-[15px] font-semibold text-ios-blue transition active:scale-[.97] active:opacity-70 disabled:opacity-40;
+  }
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-full bg-ios-red/10 px-5 py-2.5 text-[15px] font-semibold text-ios-red transition active:scale-[.97] disabled:opacity-40;
+  }
+  .input {
+    @apply w-full rounded-xl bg-ios-fill px-3.5 py-2.5 text-[17px] text-ios-label outline-none placeholder:text-ios-tertiary focus:ring-2 focus:ring-ios-blue/40;
+  }
+  .label {
+    @apply mb-1.5 block px-1 text-[13px] font-normal text-ios-secondary;
+  }
+  .chip {
+    @apply shrink-0 rounded-full bg-ios-fill px-3.5 py-1.5 text-[15px] text-ios-label;
+  }
+  .chip-on {
+    @apply shrink-0 rounded-full bg-ios-blue px-3.5 py-1.5 text-[15px] font-semibold text-white;
+  }
+  /* ตัวเลือกแบบแบ่งช่อง (segmented control) ของ iOS */
+  .segmented {
+    @apply grid gap-0.5 rounded-[10px] bg-ios-fill p-0.5;
+  }
+  .seg {
+    @apply rounded-[8px] px-2 py-1.5 text-[13px] font-medium text-ios-label;
+  }
+  .seg-on {
+    @apply rounded-[8px] bg-ios-card px-2 py-1.5 text-[13px] font-semibold text-ios-label shadow-[0_3px_8px_rgba(0,0,0,0.12)];
+  }
+  /* รายการแบบกลุ่ม (inset grouped list) ของ iOS */
+  .ios-list {
+    @apply overflow-hidden rounded-widget bg-ios-card;
+  }
+  .ios-row {
+    @apply relative flex items-center gap-3 px-4 py-3 text-[17px];
+  }
+  .ios-row + .ios-row::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 16px;
+    right: 0;
+    border-top: 0.5px solid var(--sep);
+  }
+  .section-title {
+    @apply px-4 pb-1.5 pt-4 text-[13px] uppercase tracking-wide text-ios-secondary;
+  }
+  /* วัสดุโปร่งแสงแบบกระจก (แถบเมนู/หัวข้อ) */
+  .glass {
+    background: var(--glass);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    backdrop-filter: saturate(180%) blur(20px);
+  }
+}
+
+/* แถบเลื่อนแนวนอน (ชิปวัน/หมวด) ซ่อนแถบ scrollbar */
+.hscroll {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.hscroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* หมุดบนแผนที่ Leaflet */
+.pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  background: #e11d48;
+  color: #fff;
+  font-weight: 700;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+.pin > span {
+  transform: rotate(45deg);
+  font-size: 14px;
+  line-height: 1;
+}
+.pin-hotel {
+  background: #0369a1;
+}
+.pin-visited {
+  background: #16a34a;
+}
+.pin-active {
+  outline: 3px solid #fbbf24;
+}
+.leaflet-container {
+  font-family: inherit;
+  background: var(--fill);
+}
+
+/* แอนิเมชันเปิด sheet */
+@keyframes sheet-in {
+  from {
+    transform: translateY(40px);
+    opacity: 0.6;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.sheet-in {
+  animation: sheet-in 0.28s cubic-bezier(0.2, 0.9, 0.3, 1);
+}

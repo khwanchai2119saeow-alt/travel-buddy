@@ -1,0 +1,7 @@
+node_modules
+.next
+out
+next-env.d.ts
+*.tsbuildinfo
+# ไฟล์ OCR ที่คัดลอกอัตโนมัติตอน npm install (ขนาดใหญ่)
+public/ocr

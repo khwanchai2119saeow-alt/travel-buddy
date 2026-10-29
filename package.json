@@ -1,0 +1,42 @@
+{
+  "name": "hokkaido-trip",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ผู้ช่วยเที่ยวญี่ปุ่น & สมุดค่าใช้จ่าย (PWA ฟรี 100% ใช้ออฟไลน์ได้)",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "postbuild": "node scripts/postbuild-sw.mjs",
+    "preview": "npx serve out -l 3000",
+    "typecheck": "tsc --noEmit",
+    "postinstall": "node scripts/copy-ocr-assets.mjs"
+  },
+  "dependencies": {
+    "dexie": "^4.0.1",
+    "dexie-react-hooks": "^1.1.7",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^2.5.2",
+    "jsqr": "^1.4.0",
+    "leaflet": "^1.9.4",
+    "next": "^15.5.0",
+    "qrcode-generator": "^1.4.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tesseract.js": "^5.1.1"
+  },
+  "optionalDependencies": {
+    "@tesseract.js-data/chi_sim": "^1.0.0",
+    "@tesseract.js-data/eng": "*",
+    "@tesseract.js-data/jpn": "*"
+  },
+  "devDependencies": {
+    "@types/leaflet": "^1.9.0",
+    "@types/node": "^20.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.14",
+    "typescript": "^5.6.0"
+  }
+}

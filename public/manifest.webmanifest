@@ -1,0 +1,18 @@
+{
+  "name": "ผู้ช่วยเที่ยว",
+  "short_name": "ผู้ช่วยเที่ยว",
+  "description": "แผนเที่ยว แผนที่ ค่าใช้จ่าย สแกนใบเสร็จ และแปลภาษา ญี่ปุ่น · จีน ใช้ออฟไลน์ได้",
+  "lang": "th",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f2f2f7",
+  "theme_color": "#f2f2f7",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
