@@ -10,7 +10,7 @@ Dexie (IndexedDB) · Leaflet + OpenStreetMap · Tesseract.js 5 · html2canvas ·
 ## กฎเหล็ก (ห้ามละเมิด)
 0. **ใช้บน iPhone เท่านั้น** (Safari / เพิ่มลงหน้าจอโฮม) ไม่ต้องรองรับ Android · หน้าตาแบบแอป iOS: ใช้คลาส/สี `ios-*` ใน `tailwind.config.js` + `globals.css` (รองรับโหมดมืดอัตโนมัติ) อย่าใช้สี slate/rose แบบตายตัว
 1. **ฟรี 100%** ห้ามใช้ API/บริการที่ต้องผูกบัตรหรือเสียเงิน (ห้าม Google Maps API, OpenAI, Vision API ฯลฯ)
-   ใช้ได้เฉพาะไลบรารีโอเพนซอร์สและ API ฟรีที่ไม่ต้องสมัครบัตร (OSM tiles, Nominatim, MyMemory, Open-Meteo)
+   ใช้ได้เฉพาะไลบรารีโอเพนซอร์สและ API ฟรีที่ไม่ต้องสมัครบัตร (OSM tiles, Nominatim, Photon, MyMemory, Open-Meteo)
 2. **UI ทุกข้อความเป็นภาษาไทย** (ปุ่ม ป้าย ข้อความแจ้งเตือน)
 3. **ออฟไลน์ก่อน** ข้อมูลอยู่ใน IndexedDB (`src/lib/db.ts`) ไม่มีเซิร์ฟเวอร์ ไม่มีล็อกอิน
    **หลายทริป**: ตาราง `trips` (ประเทศ วันที่ เรท ล็อต) · ทุกรายการใน `pre/daily/places` มี `tripUid` · หน้าใช้ `useSettings()` = ทริปที่เปิดอยู่ + ชื่อ/โน้ตร่วม · `saveSettings()` แยกเขียนเอง
@@ -36,7 +36,7 @@ GitHub Pages (ซับพาธ): `NEXT_PUBLIC_BASE_PATH=/ชื่อrepo npm 
 `npm install` / `npm run build` / `npm run typecheck` ผ่านแล้ว และ build ตรวจ type ด้วย (`ignoreBuildErrors: false`)
 ทดสอบทุกหน้าในเบราว์เซอร์ (dev) และทดสอบออฟไลน์ด้วย build + preview แล้ว (ปิดเซิร์ฟเวอร์ → เปิดได้ทุกหน้า, แผนที่, PNG/PDF, OCR หลังสแกนออนไลน์ 1 ครั้ง)
 หลัง `next build` จะรัน `scripts/postbuild-sw.mjs` ใส่รายชื่อไฟล์ทั้งหมดลง `out/sw.js` (PRECACHE + VERSION ตาม BUILD_ID) — อย่าลบสคริปต์นี้
-ทำแล้ว: รูปหลายรูปต่อสถานที่ (Dexie v5 — `Place.photos`, ฟิลด์ `photo` เดิมเลิกใช้ อ่านผ่าน `placePhotos()`), ติ๊กไปแล้วอัตโนมัติด้วย GPS (`AutoVisit.tsx`, ตั้งค่า `autoVisit` เฉพาะเครื่อง, ทำงานเฉพาะตอนเปิดแอป) · เที่ยวเป็นกลุ่ม (Dexie v4 — 2 คนเดิมเป็นสมาชิก 'a'/'b'), QR เชิญ, ส่ง/รับอัปเดต, ปุ่มย้อนกลับแบบ iOS, workflow GitHub Pages (`.github/workflows/deploy.yml`) · หลายทริป + ประเทศจีน (หน้า `/trips/`, Dexie v3 ย้ายข้อมูลเดิมเป็นทริปแรก, OCR `chi_sim`, วลี/ป้าย/ใบเสร็จจีน, Apple Maps ในจีน) · นำเข้า CSV (`csv.ts`, `CsvImport.tsx`), แปลรายการใบเสร็จ (`receipt.ts` `parseItems` + `receiptWords.ts`), ดีไซน์แบบ iOS + โหมดมืด
+ทำแล้ว: ค้นหาสถานที่พิมพ์ไทยได้ (`geo.ts` `searchPlace`: แปลชื่อด้วย MyMemory แล้วค้น Nominatim + Photon — ค้นตรงจาก Google ในแอปทำไม่ได้เพราะต้องใช้ Places API ที่ผูกบัตร จึงมีแค่ปุ่มเปิดแอป Google Maps), ย่อ/ขยายรายวันในแผนเที่ยว · รูปหลายรูปต่อสถานที่ (Dexie v5 — `Place.photos`, ฟิลด์ `photo` เดิมเลิกใช้ อ่านผ่าน `placePhotos()`), ติ๊กไปแล้วอัตโนมัติด้วย GPS (`AutoVisit.tsx`, ตั้งค่า `autoVisit` เฉพาะเครื่อง, ทำงานเฉพาะตอนเปิดแอป) · เที่ยวเป็นกลุ่ม (Dexie v4 — 2 คนเดิมเป็นสมาชิก 'a'/'b'), QR เชิญ, ส่ง/รับอัปเดต, ปุ่มย้อนกลับแบบ iOS, workflow GitHub Pages (`.github/workflows/deploy.yml`) · หลายทริป + ประเทศจีน (หน้า `/trips/`, Dexie v3 ย้ายข้อมูลเดิมเป็นทริปแรก, OCR `chi_sim`, วลี/ป้าย/ใบเสร็จจีน, Apple Maps ในจีน) · นำเข้า CSV (`csv.ts`, `CsvImport.tsx`), แปลรายการใบเสร็จ (`receipt.ts` `parseItems` + `receiptWords.ts`), ดีไซน์แบบ iOS + โหมดมืด
 สภาพอากาศรายวันทำแล้ว (`src/lib/weather.ts`, `WeatherCard.tsx`, Dexie v2 ตาราง `weather` = แคช ไม่อยู่ในไฟล์สำรอง)
 ยังไม่ได้ทดสอบบนมือถือจริง: กล้อง, เสียงอ่าน (TTS), GPS, เมนูแชร์, ติดตั้ง PWA บน iPhone, ไทล์แผนที่ตอนโหมดเครื่องบินจริง
 เรทเริ่มต้น ¥100 = ฿23.00 เป็นแค่ค่าสมมติ ผู้ใช้ตั้งเรทจริงในหน้าตั้งค่า

@@ -1,4 +1,5 @@
-// ตัวช่วยเรื่องพิกัด: ดึงพิกัดจากลิงก์ Google Maps, ค้นหาชื่อสถานที่ (Nominatim ของ OSM — ฟรี), ลิงก์นำทาง
+// ตัวช่วยเรื่องพิกัด: ดึงพิกัดจากลิงก์ Google Maps, ค้นหาชื่อสถานที่ (Nominatim + Photon — ฟรี), ลิงก์นำทาง
+import { myMemory } from './translate';
 
 export interface LatLng {
   lat: number;
@@ -30,31 +31,87 @@ export function parseLatLng(input: string): LatLng | null {
 }
 
 export interface GeoResult {
-  name: string;
+  name: string; // ชื่อสถานที่
+  detail: string; // ที่อยู่/เมือง
   lat: number;
   lng: number;
 }
 
-/** ค้นหาชื่อสถานที่ผ่าน Nominatim (ต้องมีเน็ต, เรียกเมื่อผู้ใช้กดค้นหาเท่านั้น เพื่อไม่ละเมิดนโยบายการใช้งาน) */
-export async function searchPlace(query: string): Promise<GeoResult[]> {
-  const url =
-    'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&accept-language=th&q=' +
-    encodeURIComponent(query);
-  const res = await fetch(url, { headers: { Accept: 'application/json' } });
-  if (!res.ok) throw new Error('ค้นหาไม่สำเร็จ');
-  const rows: { display_name: string; lat: string; lon: string }[] = await res.json();
-  return rows.map((r) => ({ name: r.display_name, lat: parseFloat(r.lat), lng: parseFloat(r.lon) }));
+interface SearchArea {
+  geoCode: string; // countrycodes เช่น jp, cn
+  mtLang: string; // ภาษาท้องถิ่นสำหรับแปลชื่อ
+  center: [number, number]; // ให้ผลใกล้เมืองนี้ขึ้นก่อน
 }
 
-/** หาพิกัดแรกที่เจอในประเทศที่กำหนด (countrycodes เช่น jp, cn — ใช้ตอนนำเข้า CSV ที่ไม่มีพิกัด) — ผู้เรียกต้องเว้นระยะ ≥ 1 วินาทีต่อครั้ง ตามนโยบาย Nominatim */
-export async function geocodeIn(query: string, countryCode: string): Promise<GeoResult | null> {
+async function nominatim(query: string, area: SearchArea): Promise<GeoResult[]> {
   const url =
-    `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=${countryCode}&accept-language=th&q=` +
+    `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=${area.geoCode}&accept-language=th,en&q=` +
     encodeURIComponent(query);
   const res = await fetch(url, { headers: { Accept: 'application/json' } });
   if (!res.ok) throw new Error('ค้นหาไม่สำเร็จ');
   const rows: { display_name: string; lat: string; lon: string }[] = await res.json();
-  return rows[0] ? { name: rows[0].display_name, lat: parseFloat(rows[0].lat), lng: parseFloat(rows[0].lon) } : null;
+  return rows.map((r) => {
+    const [name, ...rest] = r.display_name.split(', ');
+    return { name, detail: rest.slice(0, 3).join(', '), lat: parseFloat(r.lat), lng: parseFloat(r.lon) };
+  });
+}
+
+interface PhotonFeature {
+  geometry: { coordinates: [number, number] };
+  properties: { name?: string; street?: string; city?: string; state?: string; countrycode?: string };
+}
+
+async function photon(query: string, area: SearchArea): Promise<GeoResult[]> {
+  const url = `https://photon.komoot.io/api/?limit=6&lat=${area.center[0]}&lon=${area.center[1]}&q=` + encodeURIComponent(query);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('ค้นหาไม่สำเร็จ');
+  const data: { features: PhotonFeature[] } = await res.json();
+  return data.features
+    .filter((f) => f.properties.countrycode?.toLowerCase() === area.geoCode && f.properties.name)
+    .map((f) => ({
+      name: f.properties.name!,
+      detail: [f.properties.street, f.properties.city, f.properties.state].filter(Boolean).join(', '),
+      lat: f.geometry.coordinates[1],
+      lng: f.geometry.coordinates[0],
+    }));
+}
+
+const hasThai = (s: string) => /[\u0E00-\u0E7F]/.test(s);
+
+/** ค้นหาชื่อสถานที่ (ฟรี ไม่ต้องใช้ key ต้องมีเน็ต เรียกเมื่อผู้ใช้กดค้นหาเท่านั้น)
+ *  บริการแผนที่ฟรีแทบไม่รู้จักชื่อภาษาไทย จึงแปลเป็นอังกฤษ/ภาษาท้องถิ่นก่อนแล้วค้นทั้งสองแหล่ง
+ *  Nominatim จำกัด 1 ครั้ง/วินาที → ใช้แค่คำเดียวต่อการกด ส่วนคำอื่นค้นจาก Photon */
+export async function searchPlace(query: string, area: SearchArea): Promise<GeoResult[]> {
+  const q = query.trim();
+  const variants = [q];
+  if (hasThai(q)) {
+    const tr = await Promise.allSettled([myMemory(q, 'th', 'en'), myMemory(q, 'th', area.mtLang)]);
+    const found = tr.flatMap((r) => (r.status === 'fulfilled' && !hasThai(r.value) ? [r.value.trim()] : []));
+    variants.unshift(...new Set(found));
+  }
+  const settled = await Promise.allSettled([nominatim(variants[0], area), ...variants.map((v) => photon(v, area))]);
+  if (settled.every((r) => r.status === 'rejected')) throw new Error('ค้นหาไม่สำเร็จ');
+  const seen = new Set<string>();
+  const out: GeoResult[] = [];
+  for (const r of settled) {
+    if (r.status !== 'fulfilled') continue;
+    for (const g of r.value) {
+      const key = `${g.lat.toFixed(3)},${g.lng.toFixed(3)}`; // จุดเดียวกัน (~100 ม.) แสดงครั้งเดียว
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(g);
+    }
+  }
+  return out.slice(0, 8);
+}
+
+/** เปิดค้นหาชื่อนี้ในแอป Google Maps (ลิงก์ฟรี ไม่ต้องใช้ API key) */
+export function googleSearchUrl(query: string): string {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+}
+
+export function appleSearchUrl(query: string): string {
+  return `https://maps.apple.com/?q=${encodeURIComponent(query)}`;
 }
 
 /** ลิงก์เปิดนำทางในแอป Google Maps ของเครื่อง (มือถือจะเด้งเข้าแอปเอง) — ใช้ในจีนไม่ได้ถ้าไม่มี VPN */

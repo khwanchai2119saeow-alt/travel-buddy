@@ -1,8 +1,8 @@
 'use client';
-// ฟอร์มเพิ่ม/แก้ไขสถานที่ — เลือกพิกัดได้ 4 วิธี: ค้นหาชื่อ, วางลิงก์ Google Maps, ตำแหน่งปัจจุบัน, แตะบนแผนที่
+// ฟอร์มเพิ่ม/แก้ไขสถานที่ — เลือกพิกัดได้: ค้นหาชื่อ (พิมพ์ไทยได้), ตำแหน่งปัจจุบัน, แตะบนแผนที่, วางลิงก์/พิกัด
 import { useEffect, useState } from 'react';
 import { db, newUid, type Place, type PlaceKind } from '@/lib/db';
-import { currentPosition, parseLatLng, searchPlace, type GeoResult } from '@/lib/geo';
+import { appleSearchUrl, appleViewUrl, currentPosition, googleSearchUrl, parseLatLng, searchPlace, viewUrl, type GeoResult } from '@/lib/geo';
 import { shrinkImage } from '@/lib/image';
 import { activeCountry, dayLabel } from '@/lib/format';
 import { Modal } from './ui';
@@ -78,14 +78,17 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [photos, initial]);
 
+  const C = activeCountry();
+  const mapName = C.nav === 'apple' ? 'Apple Maps' : 'Google Maps';
+
   async function doSearch() {
     if (!q.trim()) return;
     setBusy(true);
     setMsg('');
     try {
-      const r = await searchPlace(q.trim());
+      const r = await searchPlace(q.trim(), C);
       setResults(r);
-      if (!r.length) setMsg(`ไม่พบสถานที่ ลองพิมพ์เป็นภาษาอังกฤษหรือภาษา${activeCountry().langName}`);
+      if (!r.length) setMsg(`ไม่พบในแอป ลองกดเปิดใน ${mapName} ด้านล่างเพื่อดูชื่อที่ถูกต้อง แล้วพิมพ์ชื่ออังกฤษ/${C.langName} หรือกด “แตะบนแผนที่”`);
     } catch {
       setMsg('ค้นหาไม่ได้ (ต้องมีอินเทอร์เน็ต) — ใช้วิธีอื่นแทนได้');
     }
@@ -95,9 +98,9 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
   function useResult(r: GeoResult) {
     setLat(r.lat.toFixed(6));
     setLng(r.lng.toFixed(6));
-    if (!title.trim()) setTitle(r.name.split(',')[0]);
+    if (!title.trim()) setTitle(q.trim() || r.name); // ใช้ชื่อที่ผู้ใช้พิมพ์ (มักเป็นภาษาไทย)
     setResults([]);
-    setMsg('เลือกตำแหน่งแล้ว');
+    setMsg(`📍 เลือกแล้ว: ${r.name}`);
   }
 
   function applyLink() {
@@ -277,36 +280,62 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
         <div className="space-y-2 rounded-2xl bg-ios-fill p-3">
           <div className="text-sm font-bold">📌 ตำแหน่งบนแผนที่</div>
           <div className="flex gap-2">
-            <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาชื่อสถานที่ (ต้องมีเน็ต)" onKeyDown={(e) => e.key === 'Enter' && doSearch()} />
-            <button className="btn-primary shrink-0" onClick={doSearch} disabled={busy}>ค้นหา</button>
+            <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="พิมพ์ชื่อสถานที่ ภาษาไทยก็ได้" onKeyDown={(e) => e.key === 'Enter' && doSearch()} />
+            <button className="btn-primary shrink-0" onClick={doSearch} disabled={busy}>{busy ? 'กำลังหา…' : 'ค้นหา'}</button>
           </div>
           {results.length > 0 && (
-            <ul className="divide-y rounded-xl bg-ios-card ring-1 ring-ios-separator">
+            <ul className="divide-y divide-ios-separator rounded-xl bg-ios-card">
               {results.map((r, i) => (
-                <li key={i}>
-                  <button className="w-full px-3 py-2 text-left text-sm" onClick={() => useResult(r)}>{r.name}</button>
+                <li key={i} className="flex items-center gap-2 pr-3">
+                  <button className="min-w-0 flex-1 px-3 py-2 text-left" onClick={() => useResult(r)}>
+                    <span className="block truncate text-[15px] font-medium">{r.name}</span>
+                    {r.detail && <span className="block truncate text-[12px] text-ios-secondary">{r.detail}</span>}
+                  </button>
+                  <a
+                    className="shrink-0 text-[13px] text-ios-blue"
+                    href={C.nav === 'apple' ? appleViewUrl(r.lat, r.lng, r.name) : viewUrl(r.lat, r.lng)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    ดูแผนที่
+                  </a>
                 </li>
               ))}
             </ul>
           )}
-          <div className="flex gap-2">
-            <input className="input" value={link} onChange={(e) => setLink(e.target.value)} placeholder="วางลิงก์ Google Maps / พิกัด" />
-            <button className="btn-ghost shrink-0" onClick={applyLink}>ใช้ลิงก์</button>
-          </div>
+          {q.trim() && (
+            <a
+              className="btn-ghost w-full"
+              href={C.nav === 'apple' ? appleSearchUrl(q.trim()) : googleSearchUrl(q.trim())}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              🔎 เปิดค้นหา “{q.trim()}” ใน {mapName}
+            </a>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <button className="btn-ghost" onClick={useGps} disabled={busy}>🎯 ตำแหน่งปัจจุบัน</button>
             <button className="btn-ghost" onClick={onRequestPick}>🗺️ แตะบนแผนที่</button>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="label">ละติจูด</label>
-              <input className="input" inputMode="decimal" value={lat} onChange={(e) => setLat(e.target.value)} />
+          <details>
+            <summary className="cursor-pointer px-1 py-1 text-[13px] text-ios-secondary">วิธีอื่น: วางลิงก์หรือใส่พิกัดเอง</summary>
+            <div className="mt-2 space-y-2">
+              <div className="flex gap-2">
+                <input className="input" value={link} onChange={(e) => setLink(e.target.value)} placeholder="วางลิงก์ Google Maps / พิกัด" />
+                <button className="btn-ghost shrink-0" onClick={applyLink}>ใช้ลิงก์</button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="label">ละติจูด</label>
+                  <input className="input" inputMode="decimal" value={lat} onChange={(e) => setLat(e.target.value)} />
+                </div>
+                <div>
+                  <label className="label">ลองจิจูด</label>
+                  <input className="input" inputMode="decimal" value={lng} onChange={(e) => setLng(e.target.value)} />
+                </div>
+              </div>
             </div>
-            <div>
-              <label className="label">ลองจิจูด</label>
-              <input className="input" inputMode="decimal" value={lng} onChange={(e) => setLng(e.target.value)} />
-            </div>
-          </div>
+          </details>
         </div>
 
         {msg && <p className="rounded-xl bg-ios-orange/10 p-2 text-sm text-ios-orange">{msg}</p>}

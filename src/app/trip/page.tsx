@@ -1,6 +1,6 @@
 'use client';
 import dynamic from 'next/dynamic';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { db, saveSettings, type Place } from '@/lib/db';
 import { useStats, useTripPlaces } from '@/lib/stats';
 import { countryOf } from '@/lib/country';
@@ -12,6 +12,9 @@ import PlaceForm from '@/components/PlaceForm';
 import WeatherCard from '@/components/WeatherCard';
 import CsvImport from '@/components/CsvImport';
 import type { MapApi } from '@/components/MapView';
+
+// จำว่าเปิดวันไหนไว้ (ต่อทริป) ให้ยังอยู่เมื่อสลับไปแท็บอื่นแล้วกลับมา
+const rememberedOpen = new Map<string, Set<number>>();
 
 const MapView = dynamic(() => import('@/components/MapView'), {
   ssr: false,
@@ -67,6 +70,30 @@ export default function TripPage() {
   }, [daily]);
 
   const days = Array.from({ length: settings.days }, (_, i) => i + 1);
+
+  // ย่อ/ขยายรายวัน (มุมมอง "ทุกวัน") — เริ่มต้นเปิดเฉพาะวันนี้ หรือวันแรกที่มีแผน
+  const daysWithPlaces = useMemo(() => Array.from(new Set(sorted.map((p) => p.day))), [sorted]);
+  const [openDays, setOpenDays] = useState<Set<number> | null>(null);
+  const activeOpen = useMemo(() => {
+    if (openDays) return openDays;
+    const saved = rememberedOpen.get(settings.uid);
+    if (saved) return saved;
+    const today = todayDay(settings);
+    return new Set<number>(daysWithPlaces.includes(today) ? [today] : daysWithPlaces.slice(0, 1));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openDays, settings.uid, settings.tripStart, settings.days, daysWithPlaces]);
+  function setOpen(next: Set<number>) {
+    rememberedOpen.set(settings.uid, next);
+    setOpenDays(next);
+  }
+  function toggleDay(d: number) {
+    const next = new Set(activeOpen);
+    if (next.has(d)) next.delete(d);
+    else next.add(d);
+    setOpen(next);
+  }
+  const allOpen = daysWithPlaces.length > 0 && daysWithPlaces.every((d) => activeOpen.has(d));
+  useEffect(() => setOpenDays(null), [settings.uid]); // สลับทริป → ใช้ค่าของทริปนั้น
   const countByDay = (d: number) => allPlaces.filter((p) => p.day === d).length;
 
   function openAdd() {
@@ -216,6 +243,14 @@ export default function TripPage() {
           </div>
         )}
 
+        {selectedDay === 0 && daysWithPlaces.length > 1 && (
+          <div className="flex justify-end">
+            <button className="text-[15px] text-ios-blue" onClick={() => setOpen(new Set(allOpen ? [] : daysWithPlaces))}>
+              {allOpen ? 'ย่อทั้งหมด' : 'ขยายทั้งหมด'}
+            </button>
+          </div>
+        )}
+
         {shown.map((p, idx) => {
           const prevDay = idx > 0 ? shown[idx - 1].day : -1;
           const spent = spentByPlace.get(p.uid) ?? 0;
@@ -227,9 +262,16 @@ export default function TripPage() {
           return (
             <div key={p.uid}>
               {selectedDay === 0 && p.day !== prevDay && (
-                <h3 className="mb-1 mt-3 text-sm font-bold text-ios-secondary">{dayLabel(settings, p.day)}</h3>
+                <DayHeader
+                  label={dayLabel(settings, p.day)}
+                  total={shown.filter((x) => x.day === p.day).length}
+                  done={shown.filter((x) => x.day === p.day && x.visited).length}
+                  open={activeOpen.has(p.day)}
+                  onToggle={() => toggleDay(p.day)}
+                />
               )}
-              <div className={`card flex items-start gap-3 !p-3 ${p.uid === activeUid ? 'ring-2 ring-ios-orange' : ''}`}>
+              {(selectedDay !== 0 || activeOpen.has(p.day)) && (
+              <div className={`mt-2 card flex items-start gap-3 !p-3 ${p.uid === activeUid ? 'ring-2 ring-ios-orange' : ''}`}>
                 <button
                   onClick={() => focusPlace(p)}
                   className={`mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full text-sm font-bold text-white ${
@@ -261,6 +303,7 @@ export default function TripPage() {
                   )}
                 </div>
               </div>
+              )}
             </div>
           );
         })}
@@ -298,5 +341,20 @@ export default function TripPage() {
         onClose={closeForm}
       />
     </>
+  );
+}
+
+/** หัวข้อของแต่ละวัน แตะเพื่อย่อ/ขยาย */
+function DayHeader({ label, total, done, open, onToggle }: { label: string; total: number; done: number; open: boolean; onToggle: () => void }) {
+  return (
+    <button className="card flex w-full items-center gap-3 !py-3 text-left" onClick={onToggle} aria-expanded={open}>
+      <span className="min-w-0 flex-1 truncate text-[17px] font-semibold">{label}</span>
+      <span className="shrink-0 text-[13px] text-ios-secondary">
+        {total} จุด{done > 0 ? ` · ไปแล้ว ${done}` : ''}
+      </span>
+      <svg viewBox="0 0 12 20" width="9" height="15" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={`shrink-0 text-ios-tertiary transition-transform ${open ? 'rotate-90' : ''}`}>
+        <path d="M2 2l8 8-8 8" />
+      </svg>
+    </button>
   );
 }

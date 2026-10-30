@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { db, newUid, type Place, type Settings } from '@/lib/db';
 import { readPlanCsv, templateCsv, exportPlanCsv, type CsvRow } from '@/lib/csv';
-import { geocodeIn } from '@/lib/geo';
+import { searchPlace } from '@/lib/geo';
 import { countryOf } from '@/lib/country';
 import { dayLabel, ymd } from '@/lib/format';
 import { downloadBlob } from '@/lib/image';
@@ -59,7 +59,7 @@ export default function CsvImport({ open, onClose, settings, places }: Props) {
     for (let i = 0; i < missing.length; i++) {
       const target = missing[i];
       try {
-        const hit = await geocodeIn(target.title, countryOf(settings.country).geoCode);
+        const hit = (await searchPlace(target.title, countryOf(settings.country)))[0];
         if (hit) {
           const idx = next.findIndex((r) => r.line === target.line);
           next[idx] = { ...next[idx], lat: hit.lat, lng: hit.lng, geocoded: true };
