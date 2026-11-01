@@ -132,6 +132,7 @@ export interface Place {
   bookingCode: string;
   checkIn: string;
   photos?: Blob[]; // รูปสถานที่หลายรูป (รูปแรก = รูปปก) เลื่อนดูในป๊อปอัปหมุด
+  photoCredits?: string[]; // เครดิตภาพจากอินเทอร์เน็ต เรียงตรงกับ photos ('' = ใส่เอง)
   photo?: Blob; // เลิกใช้แล้ว (สมัยรูปเดียว) — v5 ย้ายเข้า photos
   visited: boolean;
   visitedAt?: number; // เวลาที่ติ๊กว่าไปแล้ว

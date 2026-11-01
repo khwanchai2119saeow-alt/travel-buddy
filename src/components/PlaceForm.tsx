@@ -1,12 +1,18 @@
 'use client';
 // ฟอร์มเพิ่ม/แก้ไขสถานที่ — เลือกพิกัดได้: ค้นหาชื่อ (พิมพ์ไทยได้), ตำแหน่งปัจจุบัน, แตะบนแผนที่, วางลิงก์/พิกัด
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { db, newUid, type Place, type PlaceKind } from '@/lib/db';
 import { appleSearchUrl, appleViewUrl, currentPosition, googleSearchUrl, parseLatLng, searchPlace, viewUrl, type GeoResult } from '@/lib/geo';
 import { shrinkImage } from '@/lib/image';
 import { activeCountry, dayLabel } from '@/lib/format';
 import { Modal } from './ui';
-import { MAX_PLACE_PHOTOS, placePhotos } from '@/lib/photos';
+import { MAX_PLACE_PHOTOS, findPlacePhotos, placeCredits, placePhotos } from '@/lib/photos';
+import { myMemory } from '@/lib/translate';
+
+interface PhotoItem {
+  blob: Blob;
+  credit: string;
+}
 
 interface Props {
   tripUid: string;
@@ -31,8 +37,12 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
   const [checkIn, setCheckIn] = useState('');
   const [lat, setLat] = useState('');
   const [lng, setLng] = useState('');
-  const [photos, setPhotos] = useState<Blob[] | undefined>(undefined); // undefined = ไม่เปลี่ยน (ใช้รูปเดิม)
+  const [items, setItems] = useState<PhotoItem[] | undefined>(undefined); // undefined = ไม่เปลี่ยน (ใช้รูปเดิม)
   const [adding, setAdding] = useState(false);
+  const [webBusy, setWebBusy] = useState(false);
+  const [webMsg, setWebMsg] = useState('');
+  const usedSources = useRef(new Set<string>()); // รูปจากเน็ตที่ดึงแล้ว กดหาอีกครั้งจะได้รูปใหม่
+  const session = useRef(0); // ปิด/เปิดฟอร์มใหม่แล้ว ผลที่โหลดค้างอยู่จะไม่ถูกใส่
   const [q, setQ] = useState('');
   const [link, setLink] = useState('');
   const [results, setResults] = useState<GeoResult[]>([]);
@@ -51,7 +61,11 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
     setCheckIn(initial?.checkIn ?? '');
     setLat(initial ? String(initial.lat) : '');
     setLng(initial ? String(initial.lng) : '');
-    setPhotos(undefined);
+    setItems(undefined);
+    setWebMsg('');
+    setWebBusy(false);
+    usedSources.current = new Set();
+    session.current++;
     setQ('');
     setLink('');
     setResults([]);
@@ -69,14 +83,20 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
   }, [picked?.seq]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // รูปที่จะบันทึก: แก้แล้วใช้รายการใหม่ ไม่งั้นใช้ของเดิม
-  const current = photos ?? (initial ? placePhotos(initial) : []);
+  const savedItems = (): PhotoItem[] => {
+    if (!initial) return [];
+    const blobs = placePhotos(initial);
+    const credits = placeCredits(initial, blobs.length);
+    return blobs.map((blob, i) => ({ blob, credit: credits[i] }));
+  };
+  const current = items ?? savedItems();
   const [thumbs, setThumbs] = useState<string[]>([]);
   useEffect(() => {
-    const u = current.map((b) => URL.createObjectURL(b));
+    const u = current.map((x) => URL.createObjectURL(x.blob));
     setThumbs(u);
     return () => u.forEach((x) => URL.revokeObjectURL(x));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [photos, initial]);
+  }, [items, initial]);
 
   const C = activeCountry();
   const mapName = C.nav === 'apple' ? 'Apple Maps' : 'Google Maps';
@@ -101,6 +121,7 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
     if (!title.trim()) setTitle(q.trim() || r.name); // ใช้ชื่อที่ผู้ใช้พิมพ์ (มักเป็นภาษาไทย)
     setResults([]);
     setMsg(`📍 เลือกแล้ว: ${r.name}`);
+    if (current.length === 0) importWebPhotos([r.name, q, title]); // ยังไม่มีรูป → ดึงให้อัตโนมัติ
   }
 
   function applyLink() {
@@ -133,21 +154,47 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
     const room = MAX_PLACE_PHOTOS - current.length;
     if (room <= 0) return setMsg(`ใส่ได้สูงสุด ${MAX_PLACE_PHOTOS} รูปต่อสถานที่`);
     setAdding(true);
-    const added: Blob[] = [];
+    const added: PhotoItem[] = [];
     for (const f of Array.from(files).slice(0, room)) {
       try {
-        added.push(await shrinkImage(f, 1000, 0.8));
+        added.push({ blob: await shrinkImage(f, 1000, 0.8), credit: '' });
       } catch {
         setMsg('บางรูปใช้ไม่ได้ ข้ามไป');
       }
     }
     if (files.length > room) setMsg(`ใส่ได้สูงสุด ${MAX_PLACE_PHOTOS} รูป — เพิ่มแค่ ${room} รูปแรก`);
-    setPhotos([...current, ...added]);
+    setItems((prev) => [...(prev ?? savedItems()), ...added]);
     setAdding(false);
   }
 
-  const removePhoto = (i: number) => setPhotos(current.filter((_, j) => j !== i));
-  const makeCover = (i: number) => setPhotos([current[i], ...current.filter((_, j) => j !== i)]);
+  const removePhoto = (i: number) => setItems(current.filter((_, j) => j !== i));
+  const makeCover = (i: number) => setItems([current[i], ...current.filter((_, j) => j !== i)]);
+
+  /** ดึงรูปสถานที่จากอินเทอร์เน็ต (Wikimedia Commons) — ชื่อไทยแปลเป็นอังกฤษก่อน เพราะคลังรูปไม่รู้จักชื่อไทย */
+  async function importWebPhotos(names: string[]) {
+    const room = MAX_PLACE_PHOTOS - current.length;
+    if (room <= 0) return setWebMsg(`มีรูปครบ ${MAX_PLACE_PHOTOS} รูปแล้ว`);
+    const mine = session.current;
+    setWebBusy(true);
+    setWebMsg('กำลังหารูปจากอินเทอร์เน็ต…');
+    try {
+      const terms: string[] = [];
+      for (const n of names.map((x) => x.trim()).filter(Boolean)) {
+        if (/[\u0E00-\u0E7F]/.test(n)) {
+          const en = await myMemory(n, 'th', 'en').catch(() => '');
+          if (en && !/[\u0E00-\u0E7F]/.test(en)) terms.push(en);
+        } else terms.push(n);
+      }
+      const found = await findPlacePhotos(terms, usedSources.current, Math.min(3, room));
+      if (mine !== session.current) return;
+      found.forEach((f) => usedSources.current.add(f.source));
+      if (found.length) setItems((prev) => [...(prev ?? savedItems()), ...found.map((f) => ({ blob: f.blob, credit: f.credit }))]);
+      setWebMsg(found.length ? `เพิ่ม ${found.length} รูปจากอินเทอร์เน็ตแล้ว — รูปไหนไม่ตรงกด ✕ ลบได้` : 'ไม่พบรูปของสถานที่นี้ — เพิ่มรูปเองได้');
+    } catch {
+      if (mine === session.current) setWebMsg('หารูปไม่ได้ (ต้องมีอินเทอร์เน็ต) — เพิ่มรูปเองได้');
+    }
+    if (mine === session.current) setWebBusy(false);
+  }
 
   async function save() {
     const la = parseFloat(lat);
@@ -169,8 +216,9 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
     };
     if (initial?.id) {
       const changes: Partial<Place> = { ...base };
-      if (photos !== undefined) {
-        changes.photos = photos;
+      if (items !== undefined) {
+        changes.photos = items.map((x) => x.blob);
+        changes.photoCredits = items.map((x) => x.credit);
         changes.photo = undefined;
       }
       await db.places.update(initial.id, changes);
@@ -183,7 +231,8 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
         tripUid,
         order,
         visited: false,
-        photos: photos ?? [],
+        photos: current.map((x) => x.blob),
+        photoCredits: current.map((x) => x.credit),
         createdAt: Date.now(),
       });
     }
@@ -275,6 +324,14 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
             {adding ? 'กำลังเพิ่มรูป…' : '📷 เพิ่มรูป (เลือกได้หลายรูป)'}
             <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { addPhotos(e.target.files); e.target.value = ''; }} />
           </label>
+          <button
+            className="btn-ghost ml-2 mt-2"
+            onClick={() => importWebPhotos([q, title])}
+            disabled={webBusy || (!q.trim() && !title.trim())}
+          >
+            {webBusy ? 'กำลังหารูป…' : '🌐 หารูปจากอินเทอร์เน็ต'}
+          </button>
+          {webMsg && <p className="mt-1 px-1 text-[12px] text-ios-secondary">{webMsg}</p>}
         </div>
 
         <div className="space-y-2 rounded-2xl bg-ios-fill p-3">

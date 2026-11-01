@@ -12,7 +12,7 @@ function useBlobUrls(blobs: Blob[]): string[] {
   return urls;
 }
 
-export default function PhotoGallery({ photos, alt, className = 'h-56' }: { photos: Blob[]; alt: string; className?: string }) {
+export default function PhotoGallery({ photos, credits, alt, className = 'h-56' }: { photos: Blob[]; credits?: string[]; alt: string; className?: string }) {
   const urls = useBlobUrls(photos);
   const trackRef = useRef<HTMLDivElement>(null);
   const [index, setIndex] = useState(0);
@@ -39,12 +39,15 @@ export default function PhotoGallery({ photos, alt, className = 'h-56' }: { phot
           <img key={u} src={u} alt={`${alt} รูปที่ ${i + 1}`} className="h-full w-full shrink-0 snap-center object-cover" draggable={false} />
         ))}
       </div>
+      {credits?.[index] && (
+        <p className="mt-1 truncate px-1 text-[11px] text-ios-secondary">{credits[index]}</p>
+      )}
       {urls.length > 1 && (
         <>
           <span className="glass absolute right-2 top-2 rounded-full px-2 py-0.5 text-[12px] font-semibold">
             {index + 1}/{urls.length}
           </span>
-          <div className="absolute inset-x-0 bottom-2 flex justify-center gap-1.5">
+          <div className={`absolute inset-x-0 flex justify-center gap-1.5 ${credits?.[index] ? 'bottom-7' : 'bottom-2'}`}>
             {urls.map((u, i) => (
               <button
                 key={u}

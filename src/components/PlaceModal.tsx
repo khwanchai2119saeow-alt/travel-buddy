@@ -7,7 +7,7 @@ import { activeCountry } from '@/lib/format';
 import { fmtCur } from '@/lib/format';
 import { Modal } from './ui';
 import PhotoGallery from './PhotoGallery';
-import { placePhotos } from '@/lib/photos';
+import { placeCredits, placePhotos } from '@/lib/photos';
 
 interface Props {
   place: Place;
@@ -30,7 +30,7 @@ export default function PlaceModal({ place, spentJpy, dayText, onClose, onEdit, 
     <Modal open onClose={onClose} title={isHotel ? '🏨 ที่พัก' : '📍 สถานที่'}>
       {photos.length ? (
         <div className="mb-3">
-          <PhotoGallery photos={photos} alt={place.title} />
+          <PhotoGallery photos={photos} credits={placeCredits(place, photos.length)} alt={place.title} />
         </div>
       ) : (
         <div className="mb-3 flex h-28 items-center justify-center rounded-2xl bg-ios-fill text-5xl">{isHotel ? '🏨' : '📍'}</div>
