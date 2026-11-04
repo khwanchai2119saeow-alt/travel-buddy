@@ -9,7 +9,7 @@ import WhoPaid from '@/components/WhoPaid';
 import { useStats, useTripPlaces } from '@/lib/stats';
 import { countryOf } from '@/lib/country';
 import { dayLabel, fmtCur, fmtThb, fmtThb0, todayDay } from '@/lib/format';
-import { BlobImg, EmptyState, Modal, PageHeader, Stat } from '@/components/ui';
+import { BlobImg, EmptyState, Modal, PageHeader, Stat, useSingleFlight } from '@/components/ui';
 import DailyChart from '@/components/DailyChart';
 import DayExpenseForm from '@/components/DayExpenseForm';
 
@@ -244,6 +244,7 @@ function PreSection({
   const [msg, setMsg] = useState('');
   const [payer, setPayer] = useState<string | undefined>(undefined);
   const [split, setSplit] = useState<string[] | undefined>(undefined);
+  const [run, saving] = useSingleFlight();
 
   useEffect(() => {
     setCategory(editing?.category ?? 'flight');
@@ -259,7 +260,8 @@ function PreSection({
   const sorted = useMemo(() => [...pre].sort((a, b) => b.createdAt - a.createdAt), [pre]);
   const subtotal = (k: PreCategory) => pre.filter((p) => p.category === k).reduce((a, p) => a + p.thb, 0);
 
-  async function save() {
+  const save = () => run(saveNow);
+  async function saveNow() {
     const thb = parseFloat(amount.replace(/,/g, ''));
     if (!(thb > 0)) return setMsg('ใส่ยอดเงินเป็นบาทก่อน');
     const data = { category, title: title.trim(), thb, payer, split, note: note.trim() };
@@ -318,8 +320,8 @@ function PreSection({
               ยกเลิก
             </button>
           )}
-          <button className="btn-primary flex-1 !py-3 text-base" onClick={save}>
-            💾 {editing ? 'บันทึกการแก้ไข' : 'บันทึก'}
+          <button className="btn-primary flex-1 !py-3 text-base" onClick={save} disabled={saving}>
+            💾 {saving ? 'กำลังบันทึก…' : editing ? 'บันทึกการแก้ไข' : 'บันทึก'}
           </button>
         </div>
       </div>

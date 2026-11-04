@@ -11,7 +11,7 @@ import { guessReceipt, parseItems, type ReceiptItem } from '@/lib/receipt';
 import { glossItem, guessCategory } from '@/lib/receiptWords';
 import { myMemory } from '@/lib/translate';
 import { countryOf } from '@/lib/country';
-import { PageHeader, useBlobUrl } from '@/components/ui';
+import { PageHeader, useBlobUrl, useSingleFlight } from '@/components/ui';
 
 export default function ScanPage() {
   const { stats, settings } = useStats();
@@ -31,6 +31,7 @@ export default function ScanPage() {
   const [online, setOnline] = useState<Record<string, string>>({}); // ชื่อญี่ปุ่น → คำแปลออนไลน์
   const [translating, setTranslating] = useState(false);
   const [itemMsg, setItemMsg] = useState('');
+  const [run, saving] = useSingleFlight();
 
   const preview = useBlobUrl(file ?? undefined);
 
@@ -42,7 +43,7 @@ export default function ScanPage() {
   const jpy = parseFloat(amount.replace(/,/g, '')) || 0;
 
   async function onPick(f?: File | null) {
-    if (!f) return;
+    if (!f || busy) return;
     setFile(f);
     setRaw('');
     setCandidates([]);
@@ -78,7 +79,8 @@ export default function ScanPage() {
     setBusy(false);
   }
 
-  async function save() {
+  const save = () => run(saveNow);
+  async function saveNow() {
     if (!(jpy > 0)) return setError(`ใส่ยอดเงินเป็น${C.curName}ก่อน`);
     const receipt = file ? await shrinkImage(file, 1400, 0.75) : undefined;
     await db.daily.add({
@@ -146,11 +148,11 @@ export default function ScanPage() {
           <div className="grid grid-cols-2 gap-2">
             <label className="btn-primary cursor-pointer !py-3">
               📷 ถ่ายใบเสร็จ
-              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => onPick(e.target.files?.[0])} />
+              <input type="file" accept="image/*" capture="environment" className="hidden" disabled={busy} onChange={(e) => { onPick(e.target.files?.[0]); e.target.value = ''; }} />
             </label>
             <label className="btn-ghost cursor-pointer !py-3">
               🖼️ เลือกรูป
-              <input type="file" accept="image/*" className="hidden" onChange={(e) => onPick(e.target.files?.[0])} />
+              <input type="file" accept="image/*" className="hidden" disabled={busy} onChange={(e) => { onPick(e.target.files?.[0]); e.target.value = ''; }} />
             </label>
           </div>
           <p className="text-xs text-ios-secondary">
@@ -264,8 +266,8 @@ export default function ScanPage() {
               </div>
             </div>
 
-            <button className="btn-primary w-full !py-3 text-base" onClick={save}>
-              💾 บันทึกเป็นรายจ่าย (พร้อมแนบรูป)
+            <button className="btn-primary w-full !py-3 text-base" onClick={save} disabled={saving}>
+              {saving ? 'กำลังบันทึก…' : '💾 บันทึกเป็นรายจ่าย (พร้อมแนบรูป)'}
             </button>
 
             {raw && (

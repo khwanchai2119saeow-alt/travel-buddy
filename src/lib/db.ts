@@ -278,43 +278,62 @@ export async function getAppSettings(): Promise<AppSettings> {
     notes: cur?.notes ?? '',
     activeTrip: cur?.activeTrip ?? '',
     me: cur?.me ?? {},
+    autoVisit: cur?.autoVisit,
   };
 }
 
-/** ทริปที่เปิดอยู่ (ถ้ายังไม่มีทริปเลยจะสร้างให้ 1 ทริป) */
-export async function ensureActiveTrip(): Promise<Trip> {
-  const app = await getAppSettings();
-  const trips = await db.trips.toArray();
-  let trip = trips.find((t) => t.uid === app.activeTrip) ?? trips.sort((a, b) => b.createdAt - a.createdAt)[0];
-  if (!trip) {
-    const meId = newMemberId();
-    trip = newTrip('JP', { members: [{ id: meId, name: app.nameA }] });
-    await db.trips.add(trip);
-    app.me = { ...app.me, [trip.uid]: meId };
-    await db.settings.put({ ...app, activeTrip: trip.uid });
-  }
-  if (trip.uid !== app.activeTrip) await db.settings.put({ ...app, activeTrip: trip.uid });
-  return trip;
+/** แก้เฉพาะค่าที่ส่งมาในแถว settings (ไม่เขียนทับทั้งแถว — กันค่าที่บันทึกพร้อมกันหาย)
+ *  ใช้ key แบบ 'me.<tripUid>' แก้ค่าในออบเจกต์ me ได้ */
+export async function patchApp(changes: Partial<AppSettings> | Record<string, unknown>): Promise<void> {
+  await db.transaction('rw', db.settings, async () => {
+    if (!(await db.settings.get('main'))) await db.settings.put(await getAppSettings());
+    await db.settings.update('main', changes as Partial<AppSettings>);
+  });
+}
+
+/** บอกว่าเครื่องนี้คือสมาชิกคนไหนในทริป */
+export const setMe = (tripUid: string, memberId: string) => patchApp({ [`me.${tripUid}`]: memberId });
+
+let ensuring: Promise<Trip> | null = null;
+
+/** ทริปที่เปิดอยู่ (ถ้ายังไม่มีทริปเลยจะสร้างให้ 1 ทริป) — เรียกพร้อมกันหลายที่ก็สร้างแค่ทริปเดียว */
+export function ensureActiveTrip(): Promise<Trip> {
+  ensuring ??= db
+    .transaction('rw', db.trips, db.settings, async () => {
+      const app = await getAppSettings();
+      const trips = await db.trips.toArray();
+      let trip = trips.find((t) => t.uid === app.activeTrip) ?? trips.sort((a, b) => b.createdAt - a.createdAt)[0];
+      if (!trip) {
+        const meId = newMemberId();
+        trip = newTrip('JP', { members: [{ id: meId, name: app.nameA }] });
+        trip.id = await db.trips.add(trip);
+        app.me = { ...app.me, [trip.uid]: meId };
+      }
+      if (trip.uid !== app.activeTrip || !(await db.settings.get('main'))) await db.settings.put({ ...app, activeTrip: trip.uid });
+      return trip;
+    })
+    .finally(() => {
+      ensuring = null;
+    });
+  return ensuring;
 }
 
 /** บันทึกค่า: ชื่อ/โน้ต เก็บเป็นค่าร่วม ส่วนที่เหลือ (วันที่ เรท ล็อต ฯลฯ) เก็บลงทริปที่เปิดอยู่ */
 export async function saveSettings(patch: Partial<Settings>): Promise<void> {
-  const app = await getAppSettings();
-  const globalPatch: Partial<AppSettings> = {};
+  const globalPatch: Record<string, unknown> = {};
   const tripPatch: Partial<Trip> = {};
   for (const [k, v] of Object.entries(patch)) {
-    if ((GLOBAL_KEYS as readonly string[]).includes(k)) (globalPatch as Record<string, unknown>)[k] = v;
-    else if (k === 'me') globalPatch.me = { ...app.me }; // ตั้งด้านล่างเมื่อรู้ uid ทริป
-    else if (k !== 'uid') (tripPatch as Record<string, unknown>)[k] = v;
+    if ((GLOBAL_KEYS as readonly string[]).includes(k)) globalPatch[k] = v;
+    else if (k !== 'uid' && k !== 'me' && k !== 'id') (tripPatch as Record<string, unknown>)[k] = v;
   }
   const trip = await ensureActiveTrip();
-  if (globalPatch.me && patch.me) globalPatch.me[trip.uid] = patch.me;
-  if (Object.keys(globalPatch).length) await db.settings.put({ ...app, ...globalPatch });
+  if (patch.me) globalPatch[`me.${trip.uid}`] = patch.me;
+  if (Object.keys(globalPatch).length) await patchApp(globalPatch);
   if (Object.keys(tripPatch).length && trip.id != null) await db.trips.update(trip.id, tripPatch);
 }
 
 export async function setActiveTrip(uid: string): Promise<void> {
-  await db.settings.put({ ...(await getAppSettings()), activeTrip: uid });
+  await patchApp({ activeTrip: uid });
 }
 
 /** ลบทริปพร้อมข้อมูลทั้งหมดของทริปนั้น (รูปใบเสร็จ/รูปสถานที่ด้วย) — ย้อนกลับไม่ได้ */
@@ -324,6 +343,12 @@ export async function deleteTrip(uid: string): Promise<void> {
     await db.daily.where('tripUid').equals(uid).delete();
     await db.places.where('tripUid').equals(uid).delete();
     await db.trips.where('uid').equals(uid).delete();
+    const app = await db.settings.get('main');
+    if (app?.me && uid in app.me) {
+      const me = { ...app.me };
+      delete me[uid];
+      await db.settings.update('main', { me });
+    }
   });
   await ensureActiveTrip();
 }

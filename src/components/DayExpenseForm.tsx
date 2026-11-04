@@ -5,7 +5,7 @@ import { db, newUid, type DailyExpense, type DayCategory, type Member, type Paye
 import { DAY_CATS } from '@/lib/constants';
 import { activeCountry, fmtThb } from '@/lib/format';
 import { shrinkImage } from '@/lib/image';
-import { useBlobUrl } from './ui';
+import { useBlobUrl, useSingleFlight } from './ui';
 import WhoPaid from './WhoPaid';
 
 interface Props {
@@ -31,6 +31,7 @@ export default function DayExpenseForm({ tripUid, day, rate, members, mode, me, 
   const [receipt, setReceipt] = useState<Blob | null | undefined>(undefined);
   const [msg, setMsg] = useState('');
   const C = activeCountry();
+  const [run, saving] = useSingleFlight();
 
   useEffect(() => {
     setAmount(editing ? String(editing.jpy) : '');
@@ -58,7 +59,8 @@ export default function DayExpenseForm({ tripUid, day, rate, members, mode, me, 
     }
   }
 
-  async function save() {
+  const save = () => run(saveNow);
+  async function saveNow() {
     if (!(jpy > 0)) return setMsg(`ใส่ยอดเงินเป็น${C.curName}ก่อน`);
     const data = {
       day,
@@ -150,7 +152,7 @@ export default function DayExpenseForm({ tripUid, day, rate, members, mode, me, 
       <div className="flex items-center gap-2">
         <label className="btn-ghost cursor-pointer">
           🧾 แนบรูปใบเสร็จ
-          <input type="file" accept="image/*" className="hidden" onChange={(e) => attach(e.target.files?.[0])} />
+          <input type="file" accept="image/*" className="hidden" onChange={(e) => { attach(e.target.files?.[0]); e.target.value = ''; }} />
         </label>
         {previewUrl && (
           <>
@@ -164,8 +166,8 @@ export default function DayExpenseForm({ tripUid, day, rate, members, mode, me, 
       </div>
 
       {msg && <p className="rounded-xl bg-ios-orange/10 p-2 text-sm text-ios-orange">{msg}</p>}
-      <button className="btn-primary w-full !py-3 text-base" onClick={save}>
-        💾 {editing ? 'บันทึกการแก้ไข' : 'บันทึกรายจ่าย'}
+      <button className="btn-primary w-full !py-3 text-base" onClick={save} disabled={saving}>
+        💾 {saving ? 'กำลังบันทึก…' : editing ? 'บันทึกการแก้ไข' : 'บันทึกรายจ่าย'}
       </button>
     </div>
   );

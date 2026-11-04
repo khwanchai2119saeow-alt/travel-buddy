@@ -5,7 +5,7 @@ import { db, newUid, type Place, type PlaceKind } from '@/lib/db';
 import { appleSearchUrl, appleViewUrl, currentPosition, googleSearchUrl, parseLatLng, searchPlace, viewUrl, type GeoResult } from '@/lib/geo';
 import { shrinkImage } from '@/lib/image';
 import { activeCountry, dayLabel } from '@/lib/format';
-import { Modal } from './ui';
+import { Modal, useSingleFlight } from './ui';
 import { MAX_PLACE_PHOTOS, findPlacePhotos, placeCredits, placePhotos } from '@/lib/photos';
 import { myMemory } from '@/lib/translate';
 
@@ -48,6 +48,8 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
   const [results, setResults] = useState<GeoResult[]>([]);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
+  const [runSave, saving] = useSingleFlight();
+  const webRunning = useRef(false);
 
   // รีเซ็ตฟอร์มทุกครั้งที่เปิด
   useEffect(() => {
@@ -65,6 +67,7 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
     setWebMsg('');
     setWebBusy(false);
     usedSources.current = new Set();
+    webRunning.current = false;
     session.current++;
     setQ('');
     setLink('');
@@ -163,7 +166,7 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
       }
     }
     if (files.length > room) setMsg(`ใส่ได้สูงสุด ${MAX_PLACE_PHOTOS} รูป — เพิ่มแค่ ${room} รูปแรก`);
-    setItems((prev) => [...(prev ?? savedItems()), ...added]);
+    setItems((prev) => [...(prev ?? savedItems()), ...added].slice(0, MAX_PLACE_PHOTOS));
     setAdding(false);
   }
 
@@ -174,6 +177,8 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
   async function importWebPhotos(names: string[]) {
     const room = MAX_PLACE_PHOTOS - current.length;
     if (room <= 0) return setWebMsg(`มีรูปครบ ${MAX_PLACE_PHOTOS} รูปแล้ว`);
+    if (webRunning.current) return; // กำลังหาอยู่ (เช่นกดเลือกผลค้นหาซ้ำ) ไม่ต้องหาซ้อน
+    webRunning.current = true;
     const mine = session.current;
     setWebBusy(true);
     setWebMsg('กำลังหารูปจากอินเทอร์เน็ต…');
@@ -188,15 +193,19 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
       const found = await findPlacePhotos(terms, usedSources.current, Math.min(3, room));
       if (mine !== session.current) return;
       found.forEach((f) => usedSources.current.add(f.source));
-      if (found.length) setItems((prev) => [...(prev ?? savedItems()), ...found.map((f) => ({ blob: f.blob, credit: f.credit }))]);
+      if (found.length) {
+        setItems((prev) => [...(prev ?? savedItems()), ...found.map((f) => ({ blob: f.blob, credit: f.credit }))].slice(0, MAX_PLACE_PHOTOS));
+      }
       setWebMsg(found.length ? `เพิ่ม ${found.length} รูปจากอินเทอร์เน็ตแล้ว — รูปไหนไม่ตรงกด ✕ ลบได้` : 'ไม่พบรูปของสถานที่นี้ — เพิ่มรูปเองได้');
     } catch {
       if (mine === session.current) setWebMsg('หารูปไม่ได้ (ต้องมีอินเทอร์เน็ต) — เพิ่มรูปเองได้');
     }
+    webRunning.current = false;
     if (mine === session.current) setWebBusy(false);
   }
 
-  async function save() {
+  const save = () => runSave(saveNow);
+  async function saveNow() {
     const la = parseFloat(lat);
     const ln = parseFloat(lng);
     if (!title.trim()) return setMsg('ใส่ชื่อสถานที่ก่อน');
@@ -239,12 +248,13 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
     onClose();
   }
 
-  async function remove() {
-    if (!initial?.id) return;
-    if (!confirm(`ลบ “${initial.title}” ใช่ไหม?`)) return;
-    await db.places.delete(initial.id);
-    onClose();
-  }
+  const remove = () =>
+    runSave(async () => {
+      if (!initial?.id) return;
+      if (!confirm(`ลบ “${initial.title}” ใช่ไหม?`)) return;
+      await db.places.delete(initial.id);
+      onClose();
+    });
 
   return (
     <Modal open={open} hidden={hidden} onClose={onClose} title={initial ? 'แก้ไขสถานที่' : 'เพิ่มสถานที่'}>
@@ -399,7 +409,9 @@ export default function PlaceForm({ tripUid, open, hidden, initial, defaultDay, 
 
         <div className="flex gap-2">
           {initial && <button className="btn-danger" onClick={remove}>🗑️ ลบ</button>}
-          <button className="btn-primary flex-1 !py-3 text-base" onClick={save}>💾 บันทึก</button>
+          <button className="btn-primary flex-1 !py-3 text-base" onClick={save} disabled={saving || adding}>
+            {saving ? 'กำลังบันทึก…' : adding ? 'รอเพิ่มรูปให้เสร็จ…' : '💾 บันทึก'}
+          </button>
         </div>
       </div>
     </Modal>

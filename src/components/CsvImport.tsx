@@ -7,7 +7,7 @@ import { searchPlace } from '@/lib/geo';
 import { countryOf } from '@/lib/country';
 import { dayLabel, ymd } from '@/lib/format';
 import { downloadBlob } from '@/lib/image';
-import { Modal } from './ui';
+import { Modal, useSingleFlight } from './ui';
 
 interface Props {
   open: boolean;
@@ -24,6 +24,7 @@ export default function CsvImport({ open, onClose, settings, places }: Props) {
   const [msg, setMsg] = useState('');
   const [geo, setGeo] = useState<{ done: number; total: number } | null>(null);
   const [includeDup, setIncludeDup] = useState(false);
+  const [run, importing] = useSingleFlight();
 
   function reset() {
     setRows([]);
@@ -79,7 +80,8 @@ export default function CsvImport({ open, onClose, settings, places }: Props) {
 
   const toImport = rows.filter((r) => r.problems.length === 0 && r.lat != null && (includeDup || !r.duplicate));
 
-  async function doImport() {
+  const doImport = () => run(doImportNow);
+  async function doImportNow() {
     const orderByDay = new Map<number, number>();
     for (const p of places) orderByDay.set(p.day, Math.max(orderByDay.get(p.day) ?? -1, p.order));
     const now = Date.now();
@@ -189,7 +191,7 @@ export default function CsvImport({ open, onClose, settings, places }: Props) {
               <button className="btn-ghost" onClick={reset} disabled={!!geo}>
                 เริ่มใหม่
               </button>
-              <button className="btn-primary" onClick={doImport} disabled={!!geo || toImport.length === 0}>
+              <button className="btn-primary" onClick={doImport} disabled={!!geo || importing || toImport.length === 0}>
                 นำเข้า {toImport.length} แห่ง
               </button>
             </div>

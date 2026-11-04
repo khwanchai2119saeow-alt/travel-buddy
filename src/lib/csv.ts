@@ -91,7 +91,7 @@ function toDay(raw: string, tripStart: string, days: number): number | string {
     return n >= 1 && n <= days ? n : `วันที่ ${n} อยู่นอกทริป (มี ${days} วัน)`;
   }
   let d: Date | null = null;
-  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/); // 2026-12-03 · 2026/12/03 (แบบญี่ปุ่น) · 2026.12.03
   if (m) d = new Date(+m[1], +m[2] - 1, +m[3]);
   m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); // แบบไทย วัน/เดือน/ปี (ค.ศ. หรือ พ.ศ.)
   if (m) d = new Date(+m[3] > 2400 ? +m[3] - 543 : +m[3], +m[2] - 1, +m[1]);

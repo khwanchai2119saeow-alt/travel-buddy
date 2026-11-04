@@ -1,11 +1,12 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { newUid, requestPersistentStorage, saveSettings } from '@/lib/db';
+import { db, newUid, requestPersistentStorage, saveSettings } from '@/lib/db';
 import { effectiveRate, useSettings } from '@/lib/stats';
 import { exportAll, importMerge, wipeAll } from '@/lib/backup';
 import { downloadBlob, shareFile } from '@/lib/image';
 import { fmtCur, fmtThb, ymd } from '@/lib/format';
-import { PageHeader } from '@/components/ui';
+import { PageHeader, useSingleFlight } from '@/components/ui';
+import { MAX_DAYS } from '@/lib/validate';
 import Link from 'next/link';
 import { countryOf } from '@/lib/country';
 import MembersEditor from '@/components/MembersEditor';
@@ -68,6 +69,8 @@ export default function SettingsPage() {
   const [overwrite, setOverwrite] = useState(false);
   const [storage, setStorage] = useState('');
   const [canShare, setCanShare] = useState(false);
+  const [runBackup, backupBusy] = useSingleFlight();
+  const [endKey, setEndKey] = useState(0); // เปลี่ยนวันกลับไม่สำเร็จ/ยกเลิก → ให้ช่องวันที่กลับไปเป็นค่าเดิม
 
   useEffect(() => {
     setCanShare('share' in navigator);
@@ -104,11 +107,32 @@ export default function SettingsPage() {
     await saveSettings({ rateLots: s.rateLots.filter((l) => l.id !== id) });
   }
 
-  async function doExport(share: boolean) {
+  /** เปลี่ยนวันกลับ: ถ้าทริปสั้นลงจนมีรายการ/สถานที่อยู่ในวันที่ถูกตัด → ถามก่อน แล้วย้ายไปไว้วันสุดท้าย (ไม่ให้หายไปจากหน้าจอ) */
+  async function changeDays(n: number) {
+    if (n === s.days) return;
+    if (n < s.days) {
+      const [d, p] = await Promise.all([
+        db.daily.where('tripUid').equals(s.uid).filter((x) => x.day > n).primaryKeys(),
+        db.places.where('tripUid').equals(s.uid).filter((x) => x.day > n).primaryKeys(),
+      ]);
+      if (d.length + p.length > 0) {
+        const ok = confirm(`มีค่าใช้จ่าย ${d.length} รายการ และสถานที่ ${p.length} แห่ง อยู่หลังวันที่ ${n} — ย้ายไปไว้วันที่ ${n} (วันสุดท้าย) แล้วเปลี่ยนวันกลับเลยไหม?`);
+        if (!ok) return setEndKey((k) => k + 1);
+        await db.transaction('rw', db.daily, db.places, async () => {
+          await db.daily.where('id').anyOf(d).modify({ day: n });
+          await db.places.where('id').anyOf(p).modify({ day: n });
+        });
+      }
+    }
+    await saveSettings({ days: n });
+  }
+
+  const doExport = (share: boolean) => runBackup(() => doExportNow(share));
+  async function doExportNow(share: boolean) {
     setBackupMsg('กำลังสร้างไฟล์สำรอง…');
     try {
       const blob = await exportAll();
-      const name = `hokkaido-trip-backup-${ymd(new Date())}.json`;
+      const name = `สำรองทุกทริป-${ymd(new Date())}.json`;
       if (share) {
         const ok = await shareFile(new File([blob], name, { type: 'application/json' }), 'ไฟล์สำรองข้อมูลทริป');
         if (!ok) downloadBlob(blob, name);
@@ -121,16 +145,19 @@ export default function SettingsPage() {
     }
   }
 
-  async function doImport(file?: File | null) {
-    if (!file) return;
-    setBackupMsg('กำลังรวมข้อมูล…');
-    try {
-      const r = await importMerge(await file.text(), { overwriteSettings: overwrite });
-      setBackupMsg(`รวมข้อมูลแล้ว: ทริป +${r.trips} · ค่าใช้จ่ายล่วงหน้า +${r.pre} · ค่าใช้จ่ายรายวัน +${r.daily} · สถานที่ +${r.places} · ล็อตแลกเงิน +${r.lots} · สมาชิก +${r.members} · อัปเดตตามที่แก้ ${r.updated} (รายการที่มีอยู่แล้วไม่ถูกเพิ่มซ้ำ)`);
-    } catch (e) {
-      setBackupMsg((e as Error).message);
-    }
-  }
+  const doImport = (file?: File | null) =>
+    runBackup(async () => {
+      if (!file) return;
+      setBackupMsg('กำลังรวมข้อมูล…');
+      try {
+        const r = await importMerge(await file.text(), { overwriteSettings: overwrite });
+        setBackupMsg(
+          `รวมข้อมูลแล้ว: ทริป +${r.trips} · ค่าใช้จ่ายล่วงหน้า +${r.pre} · ค่าใช้จ่ายรายวัน +${r.daily} · สถานที่ +${r.places} · ล็อตแลกเงิน +${r.lots} · สมาชิก +${r.members} · อัปเดตตามที่แก้ ${r.updated} (รายการที่มีอยู่แล้วไม่ถูกเพิ่มซ้ำ)${r.skipped ? ` · ข้ามรายการที่ข้อมูลเสีย ${r.skipped}` : ''}`,
+        );
+      } catch (e) {
+        setBackupMsg((e as Error).message);
+      }
+    });
 
   async function doWipe() {
     if (!confirm('ลบข้อมูลทั้งหมดในเครื่องนี้ (ค่าใช้จ่าย แผนเที่ยว ตั้งค่า)? ย้อนกลับไม่ได้')) return;
@@ -157,13 +184,16 @@ export default function SettingsPage() {
           <div className="grid grid-cols-2 gap-2">
             <Field label="วันเริ่มเดินทาง" type="date" value={s.tripStart} onCommit={(v) => saveSettings({ tripStart: v })} />
             <Field
+              key={endKey}
               label="วันกลับ"
               type="date"
               value={s.tripStart ? endOf(s.tripStart, s.days) : ''}
               onCommit={(v) => {
                 if (!s.tripStart || !v) return;
                 const n = Math.round((new Date(v + 'T00:00:00').getTime() - new Date(s.tripStart + 'T00:00:00').getTime()) / 86400000) + 1;
-                if (n >= 1 && n <= 60) saveSettings({ days: n });
+                if (n >= 1 && n <= MAX_DAYS) return changeDays(n);
+                alert(n < 1 ? 'วันกลับต้องไม่ก่อนวันเริ่มเดินทาง' : `ทริปยาวได้ไม่เกิน ${MAX_DAYS} วัน`);
+                setEndKey((k) => k + 1);
               }}
             />
           </div>
@@ -268,16 +298,16 @@ export default function SettingsPage() {
             ข้อมูลอยู่ในเครื่องนี้เท่านั้น แนะนำสำรองทุกคืนหลังจดรายจ่าย หรือส่งไฟล์ให้อีกเครื่องเพื่อรวมรายการ (ไม่ซ้ำ)
           </p>
           <div className="grid grid-cols-2 gap-2">
-            <button className="btn-primary" onClick={() => doExport(false)}>⬇️ สำรองทุกทริป</button>
+            <button className="btn-primary" onClick={() => doExport(false)} disabled={backupBusy}>⬇️ สำรองทุกทริป</button>
             {canShare ? (
-              <button className="btn-ghost" onClick={() => doExport(true)}>📤 ส่งทาง LINE/แอปอื่น</button>
+              <button className="btn-ghost" onClick={() => doExport(true)} disabled={backupBusy}>📤 ส่งทาง LINE/แอปอื่น</button>
             ) : (
               <span />
             )}
           </div>
           <label className="btn-ghost w-full cursor-pointer">
             ⬆️ นำเข้า / รวมจากไฟล์สำรอง
-            <input type="file" accept="application/json,.json" className="hidden" onChange={(e) => { doImport(e.target.files?.[0]); e.target.value = ''; }} />
+            <input type="file" accept="application/json,.json" className="hidden" disabled={backupBusy} onChange={(e) => { doImport(e.target.files?.[0]); e.target.value = ''; }} />
           </label>
           <label className="flex items-center gap-2 text-xs text-ios-secondary">
             <input type="checkbox" checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} />

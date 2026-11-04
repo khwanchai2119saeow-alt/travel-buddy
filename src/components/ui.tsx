@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { PAGE_TITLES, previousPath } from './NavHistory';
 
@@ -53,6 +53,8 @@ export function PageHeader({ title, subtitle, right, back }: { title: string; su
   );
 }
 
+let scrollLocks = 0;
+
 /** หน้าต่างแบบ sheet ของ iOS (เลื่อนขึ้นจากด้านล่าง มีแถบจับด้านบน) */
 export function Modal({
   open,
@@ -67,14 +69,16 @@ export function Modal({
   hidden?: boolean;
   title?: string;
 }) {
+  // ล็อกการเลื่อนหน้าหลังขณะเปิด sheet (นับจำนวน sheet ที่เปิดซ้อนกัน — ปิดตัวสุดท้ายแล้วค่อยปลดล็อก
+  // ไม่งั้นปิดสลับลำดับแล้วหน้าเลื่อนไม่ได้ค้าง) · ซ่อนชั่วคราว (เช่นตอนแตะเลือกจุดบนแผนที่) = ปลดล็อก
+  const locked = open && !hidden;
   useEffect(() => {
-    if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    if (!locked) return;
+    if (scrollLocks++ === 0) document.body.style.overflow = 'hidden';
     return () => {
-      document.body.style.overflow = prev;
+      if (--scrollLocks === 0) document.body.style.overflow = '';
     };
-  }, [open]);
+  }, [locked]);
 
   if (!open) return null;
   return (
@@ -153,4 +157,23 @@ export function Toggle({ on, onChange, label, disabled }: { on: boolean; onChang
       <span className={`absolute top-[2px] h-[27px] w-[27px] rounded-full bg-white shadow-[0_3px_8px_rgba(0,0,0,0.15)] transition-all ${on ? 'left-[22px]' : 'left-[2px]'}`} />
     </button>
   );
+}
+
+/** กันกดซ้ำ: งานบันทึก/ส่งไฟล์ที่ใช้เวลา จะทำทีละครั้ง กดรัว ๆ ก็ไม่บันทึกซ้ำ
+ *  คืน [run, busy] — run(fn) ข้ามถ้างานก่อนหน้ายังไม่เสร็จ */
+export function useSingleFlight(): [(fn: () => Promise<unknown> | unknown) => Promise<void>, boolean] {
+  const running = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const run = useCallback(async (fn: () => Promise<unknown> | unknown) => {
+    if (running.current) return;
+    running.current = true;
+    setBusy(true);
+    try {
+      await fn();
+    } finally {
+      running.current = false;
+      setBusy(false);
+    }
+  }, []);
+  return [run, busy];
 }

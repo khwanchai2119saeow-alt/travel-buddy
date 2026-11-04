@@ -173,7 +173,7 @@ function SignReader({ C }: { C: CountryInfo }) {
   const preview = useBlobUrl(file ?? undefined);
 
   async function onPick(f?: File | null) {
-    if (!f) return;
+    if (!f || busy) return;
     setFile(f);
     setText('');
     setHits([]);
@@ -209,11 +209,11 @@ function SignReader({ C }: { C: CountryInfo }) {
         <div className="grid grid-cols-2 gap-2">
           <label className="btn-primary cursor-pointer !py-3">
             📷 ถ่ายป้าย
-            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => onPick(e.target.files?.[0])} />
+            <input type="file" accept="image/*" capture="environment" className="hidden" disabled={busy} onChange={(e) => { onPick(e.target.files?.[0]); e.target.value = ''; }} />
           </label>
           <label className="btn-ghost cursor-pointer !py-3">
             🖼️ เลือกรูป
-            <input type="file" accept="image/*" className="hidden" onChange={(e) => onPick(e.target.files?.[0])} />
+            <input type="file" accept="image/*" className="hidden" disabled={busy} onChange={(e) => { onPick(e.target.files?.[0]); e.target.value = ''; }} />
           </label>
         </div>
         <p className="text-xs text-ios-secondary">อ่านตัวอักษรจากรูปในเครื่อง แล้วจับคู่กับพจนานุกรมป้ายที่พบบ่อย (ออฟไลน์ได้) ถ้าเจอข้อความยาวค่อยกดแปลออนไลน์</p>

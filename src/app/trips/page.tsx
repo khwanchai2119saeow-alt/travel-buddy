@@ -4,16 +4,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, deleteTrip, getAppSettings, newMemberId, newTrip, setActiveTrip, tripSize, type Trip } from '@/lib/db';
+import { db, deleteTrip, getAppSettings, newMemberId, newTrip, setActiveTrip, setMe, tripSize, type Trip } from '@/lib/db';
 import { COUNTRY_LIST, countryOf, type Country } from '@/lib/country';
 import { effectiveRate, useSettings } from '@/lib/stats';
 import { fmtCur, fmtThb0, tripRangeText, ymd } from '@/lib/format';
 import { exportAll, importMerge } from '@/lib/backup';
 import { decodeInvite, inviteCode, inviteUrl, qrDataUrl, readQrFromImage } from '@/lib/invite';
 import { downloadBlob, shareFile } from '@/lib/image';
-import { Modal, PageHeader } from '@/components/ui';
+import { Modal, PageHeader, useSingleFlight } from '@/components/ui';
+import { MAX_DAYS } from '@/lib/validate';
 
-const MAX_DAYS = 60;
 
 function daysBetween(a: string, b: string): number {
   const d = Math.round((new Date(b + 'T00:00:00').getTime() - new Date(a + 'T00:00:00').getTime()) / 86400000) + 1;
@@ -159,12 +159,14 @@ export default function TripsPage() {
         }}
       />
       <JoinSheet open={joining} onClose={() => setJoining(false)} />
-      {manage && <ManageSheet trip={manage} isActive={manage.uid === active.uid} onClose={() => setManage(null)} />}
+      {manage && (
+        <ManageSheet trip={trips.find((t) => t.uid === manage.uid) ?? manage} isActive={manage.uid === active.uid} onClose={() => setManage(null)} />
+      )}
     </>
   );
 }
 
-function NewTripSheet({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (t: Trip) => void }) {
+function NewTripSheet({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (t: Trip) => Promise<void> | void }) {
   const [country, setCountry] = useState<Country>('JP');
   const [name, setName] = useState('');
   const [start, setStart] = useState('');
@@ -174,6 +176,7 @@ function NewTripSheet({ open, onClose, onCreated }: { open: boolean; onClose: ()
   const [friends, setFriends] = useState('');
   const [mode, setMode] = useState<'shared' | 'split'>('shared');
   const [msg, setMsg] = useState('');
+  const [run, creatingNow] = useSingleFlight();
   const C = countryOf(country);
 
   useEffect(() => {
@@ -191,7 +194,8 @@ function NewTripSheet({ open, onClose, onCreated }: { open: boolean; onClose: ()
 
   const days = start && end ? daysBetween(start, end) : 0;
 
-  async function create() {
+  const create = () => run(createNow);
+  async function createNow() {
     if (!start || !end) return setMsg('เลือกวันไปและวันกลับก่อน');
     if (days < 1) return setMsg('วันกลับต้องไม่ก่อนวันไป');
     if (days > MAX_DAYS) return setMsg(`ทริปยาวได้ไม่เกิน ${MAX_DAYS} วัน`);
@@ -211,9 +215,8 @@ function NewTripSheet({ open, onClose, onCreated }: { open: boolean; onClose: ()
       splitMode: others.length ? mode : 'shared',
     });
     await db.trips.add(t);
-    const app = await getAppSettings();
-    await db.settings.put({ ...app, me: { ...app.me, [t.uid]: meId } });
-    onCreated(t);
+    await setMe(t.uid, meId);
+    await onCreated(t);
   }
 
   return (
@@ -271,8 +274,8 @@ function NewTripSheet({ open, onClose, onCreated }: { open: boolean; onClose: ()
           </p>
         )}
         {msg && <p className="text-[15px] text-ios-red">{msg}</p>}
-        <button className="btn-primary w-full !py-3" onClick={create}>
-          สร้างและเปิดทริปนี้
+        <button className="btn-primary w-full !py-3" onClick={create} disabled={creatingNow}>
+          {creatingNow ? 'กำลังสร้าง…' : 'สร้างและเปิดทริปนี้'}
         </button>
       </div>
     </Modal>
@@ -287,6 +290,7 @@ function ManageSheet({ trip, isActive, onClose }: { trip: Trip; isActive: boolea
   const [confirmText, setConfirmText] = useState('');
   const [qr, setQr] = useState('');
   const [link, setLink] = useState('');
+  const [run, busy] = useSingleFlight();
 
   useEffect(() => {
     tripSize(trip.uid).then(setSize);
@@ -297,7 +301,9 @@ function ManageSheet({ trip, isActive, onClose }: { trip: Trip; isActive: boolea
     router.push('/summary/');
   }
 
-  async function backup() {
+  const backup = () => run(backupNow);
+  async function backupNow() {
+    setMsg('กำลังสร้างไฟล์สำรอง…');
     const blob = await exportAll(trip.uid);
     const fileName = `สำรองทริป-${trip.name}-${ymd(new Date())}.json`;
     const shared = await shareFile(new File([blob], fileName, { type: 'application/json' }), `ไฟล์สำรองทริป${trip.name}`);
@@ -323,7 +329,9 @@ function ManageSheet({ trip, isActive, onClose }: { trip: Trip; isActive: boolea
     }
   }
 
-  async function sendUpdate() {
+  const sendUpdate = () => run(sendUpdateNow);
+  async function sendUpdateNow() {
+    setMsg('กำลังสร้างไฟล์อัปเดต…');
     const blob = await exportAll(trip.uid);
     const fileName = `อัปเดตทริป-${trip.name}-${ymd(new Date())}.json`;
     const shared = await shareFile(new File([blob], fileName, { type: 'application/json' }), `อัปเดตทริป${trip.name}`);
@@ -331,20 +339,25 @@ function ManageSheet({ trip, isActive, onClose }: { trip: Trip; isActive: boolea
     setMsg('ส่งแล้ว — เพื่อนบันทึกไฟล์ลงแอปไฟล์ แล้วกด “รับอัปเดตจากเพื่อน” ในทริปเดียวกัน');
   }
 
-  async function receiveUpdate(file?: File | null) {
-    if (!file) return;
-    try {
-      const r = await importMerge(await file.text(), { overwriteSettings: false });
-      setMsg(`รับอัปเดตแล้ว: ค่าใช้จ่าย +${r.pre + r.daily} · สถานที่ +${r.places} · แก้ไข ${r.updated} · สมาชิก +${r.members}${r.trips ? ` · ทริปใหม่ ${r.trips}` : ''}`);
-    } catch (e) {
-      setMsg((e as Error).message);
-    }
-  }
+  const receiveUpdate = (file?: File | null) =>
+    run(async () => {
+      if (!file) return;
+      setMsg('กำลังรวมข้อมูล…');
+      try {
+        const r = await importMerge(await file.text(), { overwriteSettings: false });
+        setMsg(
+          `รับอัปเดตแล้ว: ค่าใช้จ่าย +${r.pre + r.daily} · สถานที่ +${r.places} · แก้ไข ${r.updated} · สมาชิก +${r.members}${r.trips ? ` · ทริปใหม่ ${r.trips}` : ''}${r.skipped ? ` · ข้ามรายการที่ข้อมูลเสีย ${r.skipped}` : ''}`,
+        );
+      } catch (e) {
+        setMsg((e as Error).message);
+      }
+    });
 
-  async function remove() {
-    await deleteTrip(trip.uid);
-    onClose();
-  }
+  const remove = () =>
+    run(async () => {
+      await deleteTrip(trip.uid);
+      onClose();
+    });
 
   const mb = size == null ? '…' : (size / 1024 / 1024).toFixed(size > 1024 * 1024 ? 1 : 2);
   const canDelete = confirmText.trim() === 'ลบ';
@@ -366,7 +379,7 @@ function ManageSheet({ trip, isActive, onClose }: { trip: Trip; isActive: boolea
             </span>
             <span className="text-ios-tertiary">›</span>
           </button>
-          <button className="ios-row w-full text-left" onClick={sendUpdate}>
+          <button className="ios-row w-full text-left disabled:opacity-50" onClick={sendUpdate} disabled={busy}>
             <span className="text-xl">📤</span>
             <span className="flex-1">
               <span className="block">ส่งอัปเดตให้กลุ่ม</span>
@@ -381,7 +394,7 @@ function ManageSheet({ trip, isActive, onClose }: { trip: Trip; isActive: boolea
               <span className="block text-[13px] text-ios-secondary">เลือกไฟล์ที่เพื่อนส่งมา — รายการไม่ซ้ำ ของที่เพื่อนแก้ทีหลังจะถูกอัปเดต</span>
             </span>
             <span className="text-ios-tertiary">›</span>
-            <input type="file" accept="application/json,.json" className="hidden" onChange={(e) => { receiveUpdate(e.target.files?.[0]); e.target.value = ''; }} />
+            <input type="file" accept="application/json,.json" className="hidden" disabled={busy} onChange={(e) => { receiveUpdate(e.target.files?.[0]); e.target.value = ''; }} />
           </label>
         </div>
         {qr && (
@@ -405,7 +418,7 @@ function ManageSheet({ trip, isActive, onClose }: { trip: Trip; isActive: boolea
             </span>
             <span className="text-ios-tertiary">›</span>
           </button>
-          <button className="ios-row w-full text-left" onClick={backup}>
+          <button className="ios-row w-full text-left disabled:opacity-50" onClick={backup} disabled={busy}>
             <span className="text-xl">💾</span>
             <span className="flex-1">
               <span className="block">2. สำรองข้อมูลทริปนี้ (JSON)</span>
@@ -423,7 +436,7 @@ function ManageSheet({ trip, isActive, onClose }: { trip: Trip; isActive: boolea
             {isActive ? ' · ทริปนี้เปิดอยู่ ลบแล้วแอปจะสลับไปทริปอื่นให้' : ''}
           </p>
           <input className="input" value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder="พิมพ์คำว่า ลบ เพื่อยืนยัน" />
-          <button className="btn-danger w-full" onClick={remove} disabled={!canDelete}>
+          <button className="btn-danger w-full" onClick={remove} disabled={!canDelete || busy}>
             ลบทริปนี้ถาวร
           </button>
         </div>

@@ -29,12 +29,19 @@ npm run dev        # http://localhost:3000 (Service Worker ไม่ทำงา
 npm run build      # สร้างไซต์สแตติกที่ out/
 npm run preview    # ดูของที่ build แล้ว (ต้องใช้ตัวนี้ทดสอบ Service Worker/ออฟไลน์)
 npm run typecheck
+npm test           # ทดสอบตรรกะหลัก (เงิน/เคลียร์เงิน ใบเสร็จ CSV พิกัด ลิงก์เชิญ ตรวจไฟล์สำรอง) — tests/logic.test.cjs
 ```
 GitHub Pages (ซับพาธ): `NEXT_PUBLIC_BASE_PATH=/ชื่อrepo npm run build`
 
-## สถานะปัจจุบัน (อัปเดต 29 ต.ค. 2026)
+## สถานะปัจจุบัน (อัปเดต 4 พ.ย. 2026)
 `npm install` / `npm run build` / `npm run typecheck` ผ่านแล้ว และ build ตรวจ type ด้วย (`ignoreBuildErrors: false`)
 ทดสอบทุกหน้าในเบราว์เซอร์ (dev) และทดสอบออฟไลน์ด้วย build + preview แล้ว (ปิดเซิร์ฟเวอร์ → เปิดได้ทุกหน้า, แผนที่, PNG/PDF, OCR หลังสแกนออนไลน์ 1 ครั้ง)
+ตรวจทั้งแอปแล้ว (4 พ.ย.) — กติกาที่ต้องรักษา:
+- เขียนแถว settings ด้วย `patchApp()` / `setMe()` / `saveSettings()` เท่านั้น ห้าม `db.settings.put({...app})` ทั้งแถว (เคยทำให้ค่า `autoVisit` หาย และค่าที่บันทึกพร้อมกันทับกัน)
+- ข้อมูลจากนอกเครื่อง (ลิงก์เชิญ ไฟล์สำรอง/อัปเดต) ต้องผ่าน `src/lib/validate.ts` · `importMerge` ตรวจ+แปลงรูปก่อน แล้วเขียนทีเดียวในทรานแซกชัน (ไฟล์รุ่นใหม่กว่า 2 → แจ้งให้อัปเดตแอป)
+- ปุ่มบันทึก/ส่งไฟล์ใช้ `useSingleFlight()` (ui.tsx) กันกดซ้ำแล้วได้รายการซ้ำ · sheet ซ้อนกันใช้ตัวนับล็อกการเลื่อนใน `Modal`
+- กันจอขาว: `app/error.tsx`, `global-error.tsx`, `not-found.tsx` (ไทย) + `ErrorToast` แจ้งเมื่อบันทึกไม่สำเร็จ (เช่นพื้นที่เต็ม)
+- Service Worker: หน้า/ข้อมูลหน้า = cache-first (เปิดทันทีแม้เน็ตช้า) · ติดตั้งรุ่นใหม่ต้องโหลดครบทุกไฟล์ไม่งั้นใช้รุ่นเดิม · เก็บแคชรุ่นก่อน 1 รุ่นให้หน้าที่เปิดค้างใช้ต่อได้ · มีแถบ "มีแอปเวอร์ชันใหม่" (`PwaRegister.tsx`)
 หลัง `next build` จะรัน `scripts/postbuild-sw.mjs` ใส่รายชื่อไฟล์ทั้งหมดลง `out/sw.js` (PRECACHE + VERSION ตาม BUILD_ID) — อย่าลบสคริปต์นี้
 ทำแล้ว: ดึงรูปสถานที่อัตโนมัติจาก Wikimedia Commons (`photos.ts` `findPlacePhotos`, เครดิตเก็บใน `Place.photoCredits` ห้ามตัดออก — รูปจาก Google ใช้ไม่ได้เพราะต้องใช้ API ที่ผูกบัตร) · ค้นหาสถานที่พิมพ์ไทยได้ (`geo.ts` `searchPlace`: แปลชื่อด้วย MyMemory แล้วค้น Nominatim + Photon — ค้นตรงจาก Google ในแอปทำไม่ได้เพราะต้องใช้ Places API ที่ผูกบัตร จึงมีแค่ปุ่มเปิดแอป Google Maps), ย่อ/ขยายรายวันในแผนเที่ยว · รูปหลายรูปต่อสถานที่ (Dexie v5 — `Place.photos`, ฟิลด์ `photo` เดิมเลิกใช้ อ่านผ่าน `placePhotos()`), ติ๊กไปแล้วอัตโนมัติด้วย GPS (`AutoVisit.tsx`, ตั้งค่า `autoVisit` เฉพาะเครื่อง, ทำงานเฉพาะตอนเปิดแอป) · เที่ยวเป็นกลุ่ม (Dexie v4 — 2 คนเดิมเป็นสมาชิก 'a'/'b'), QR เชิญ, ส่ง/รับอัปเดต, ปุ่มย้อนกลับแบบ iOS, workflow GitHub Pages (`.github/workflows/deploy.yml`) · หลายทริป + ประเทศจีน (หน้า `/trips/`, Dexie v3 ย้ายข้อมูลเดิมเป็นทริปแรก, OCR `chi_sim`, วลี/ป้าย/ใบเสร็จจีน, Apple Maps ในจีน) · นำเข้า CSV (`csv.ts`, `CsvImport.tsx`), แปลรายการใบเสร็จ (`receipt.ts` `parseItems` + `receiptWords.ts`), ดีไซน์แบบ iOS + โหมดมืด
 สภาพอากาศรายวันทำแล้ว (`src/lib/weather.ts`, `WeatherCard.tsx`, Dexie v2 ตาราง `weather` = แคช ไม่อยู่ในไฟล์สำรอง)

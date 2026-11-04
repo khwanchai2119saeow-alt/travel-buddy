@@ -2,7 +2,8 @@
 // ส่วนหลัง # เบราว์เซอร์ไม่ส่งไปเซิร์ฟเวอร์ใด ๆ — ลิงก์/QR นี้จึงพาข้อมูลจากเครื่องถึงเครื่องโดยตรง
 // มีแค่ชื่อทริป ประเทศ วันที่ เรท และรายชื่อสมาชิก (ไม่มีค่าใช้จ่าย/รูป — อันนั้นส่งด้วย "ส่งอัปเดตให้กลุ่ม")
 import { BASE } from './base';
-import { db, getAppSettings, newMemberId, type Member, type Trip } from './db';
+import { db, newMemberId, patchApp, type Member, type Trip } from './db';
+import { cleanTrip } from './validate';
 
 export interface InvitePayload {
   v: 1;
@@ -37,10 +38,10 @@ export function decodeInvite(input: string): InvitePayload | null {
   const code = m ? m[1] : /^[A-Za-z0-9_-]{20,}$/.test(s) ? s : '';
   if (!code) return null;
   try {
-    const p = JSON.parse(fromB64Url(code)) as InvitePayload;
-    const t = p?.trip;
-    if (p?.v !== 1 || !t?.uid || !t.name || !Array.isArray(t.members) || (t.country !== 'JP' && t.country !== 'CN')) return null;
-    return p;
+    const p = JSON.parse(fromB64Url(code)) as { v?: unknown; trip?: unknown };
+    const trip = p?.v === 1 ? cleanTrip(p.trip) : null;
+    if (!trip || trip.members.length === 0) return null;
+    return { v: 1, trip };
   } catch {
     return null;
   }
@@ -56,15 +57,16 @@ export async function joinTrip(p: InvitePayload, me: string | { newName: string 
     meId = newMemberId();
     members = [...members, { id: meId, name: me.newName }];
   }
-  const local = await db.trips.where('uid').equals(incoming.uid).first();
-  if (local) {
-    const have = new Set(local.members.map((m) => m.id));
-    await db.trips.update(local.id!, { members: [...local.members, ...members.filter((m) => !have.has(m.id))] });
-  } else {
-    await db.trips.add({ ...incoming, members });
-  }
-  const app = await getAppSettings();
-  await db.settings.put({ ...app, activeTrip: incoming.uid, me: { ...app.me, [incoming.uid]: meId } });
+  await db.transaction('rw', db.trips, db.settings, async () => {
+    const local = await db.trips.where('uid').equals(incoming.uid).first();
+    if (local) {
+      const have = new Set(local.members.map((m) => m.id));
+      await db.trips.update(local.id!, { members: [...local.members, ...members.filter((m) => !have.has(m.id))] });
+    } else {
+      await db.trips.add({ ...incoming, members });
+    }
+    await patchApp({ activeTrip: incoming.uid, [`me.${incoming.uid}`]: meId });
+  });
   return incoming.uid;
 }
 

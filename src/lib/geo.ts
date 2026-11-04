@@ -12,12 +12,19 @@ const valid = (lat: number, lng: number) =>
 /** รองรับลิงก์ที่มี @lat,lng / !3dlat!4dlng / q=lat,lng และข้อความพิกัดเปล่า ๆ เช่น "43.06, 141.35"
  *  (ลิงก์สั้น maps.app.goo.gl อ่านออฟไลน์ไม่ได้ ต้องเปิดแล้วคัดลอกลิงก์ยาวแทน) */
 export function parseLatLng(input: string): LatLng | null {
-  const s = decodeURIComponent(input.trim());
+  const raw = (input ?? '').trim();
+  let s = raw;
+  try {
+    s = decodeURIComponent(raw);
+  } catch {
+    /* มี % ที่ไม่ใช่รหัส URL (เช่น "100%") — ใช้ข้อความเดิม */
+  }
+  const N = '(-?\\d+(?:\\.\\d+)?)';
   const patterns = [
-    /@(-?\d+\.\d+),(-?\d+\.\d+)/,
-    /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/,
-    /[?&](?:q|query|ll|destination|daddr)=(-?\d+\.\d+)[,\s+]+(-?\d+\.\d+)/,
-    /^(-?\d+\.\d+)[,\s]+(-?\d+\.\d+)$/,
+    new RegExp(`@${N},${N}`),
+    new RegExp(`!3d${N}!4d${N}`),
+    new RegExp(`[?&](?:q|query|ll|destination|daddr|center)=${N}[,\\s+]+${N}`),
+    new RegExp(`^${N}[,\\s]+${N}$`),
   ];
   for (const re of patterns) {
     const m = s.match(re);

@@ -53,7 +53,11 @@ export default function SummaryPage() {
   async function renderCanvas(): Promise<HTMLCanvasElement> {
     const html2canvas = (await import('html2canvas')).default;
     if (!recapRef.current) throw new Error('ไม่พบเนื้อหา');
-    return html2canvas(recapRef.current, { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false });
+    // iPhone วาด canvas ได้ไม่เกิน ~16 ล้านพิกเซล — สรุปยาว ๆ ลดความละเอียดลงเองไม่ให้ได้รูปขาว
+    const el = recapRef.current;
+    const area = el.scrollWidth * el.scrollHeight;
+    const scale = Math.max(0.75, Math.min(2, Math.sqrt(15_000_000 / Math.max(1, area))));
+    return html2canvas(el, { scale, useCORS: true, backgroundColor: '#ffffff', logging: false });
   }
 
   async function asPng(): Promise<Blob> {

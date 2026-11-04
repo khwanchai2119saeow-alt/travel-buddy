@@ -17,6 +17,7 @@ import {
   type Trip,
 } from './db';
 import { blobToDataUrl, dataUrlToBlob } from './image';
+import { cleanDaily, cleanLots, cleanPlace, cleanPre, cleanTrip, newestByUid } from './validate';
 
 interface PackedDaily extends Omit<DailyExpense, 'receipt' | 'id'> {
   receipt?: string;
@@ -26,10 +27,14 @@ interface PackedPlace extends Omit<Place, 'photo' | 'photos' | 'id'> {
   photo?: string; // ไฟล์รุ่นเก่า (รูปเดียว)
 }
 
-/** รูปในไฟล์ → Blob (รองรับไฟล์เก่าที่มีรูปเดียว) · undefined = ไฟล์ไม่มีข้อมูลรูป */
-async function unpackPhotos(p: { photos?: string[]; photo?: string }): Promise<Blob[] | undefined> {
-  const list = p.photos ?? (p.photo ? [p.photo] : undefined);
-  return list ? Promise.all(list.map(dataUrlToBlob)) : undefined;
+/** dataURL → Blob · เสีย/อ่านไม่ได้ → undefined (ข้ามรูปนั้น ไม่ให้ทั้งไฟล์ล้ม) */
+async function toBlob(dataUrl?: string): Promise<Blob | undefined> {
+  if (!dataUrl) return undefined;
+  try {
+    return await dataUrlToBlob(dataUrl);
+  } catch {
+    return undefined;
+  }
 }
 type Shared = Pick<AppSettings, 'nameA' | 'notes'> & { nameB?: string };
 
@@ -44,46 +49,37 @@ export interface BackupFile {
   places: PackedPlace[];
 }
 
-/** ไฟล์รุ่นเก่า (ทริปเดียว) — รายการไม่มี tripUid */
-interface BackupFileV1 {
-  app: 'hokkaido-trip';
-  version: 1;
-  settings?: Partial<Settings> & { nameB?: string };
-  pre: Omit<PreExpense, 'id' | 'tripUid'>[];
-  daily: Omit<PackedDaily, 'tripUid'>[];
-  places: Omit<PackedPlace, 'tripUid'>[];
-}
-
-/** สำรองทุกทริป หรือเฉพาะทริปเดียว (ส่ง tripUid) */
+/** สำรองทุกทริป หรือเฉพาะทริปเดียว (ส่ง tripUid) — อ่านเฉพาะข้อมูลของทริปนั้นจากดัชนี ไม่โหลดรูปของทริปอื่น */
 export async function exportAll(tripUid?: string): Promise<Blob> {
-  const only = <T extends { tripUid: string }>(rows: T[]) => (tripUid ? rows.filter((r) => r.tripUid === tripUid) : rows);
+  const rows = <T,>(t: { where(i: string): { equals(v: string): { toArray(): Promise<T[]> } }; toArray(): Promise<T[]> }) =>
+    tripUid ? t.where('tripUid').equals(tripUid).toArray() : t.toArray();
   const [app, trips, pre, daily, places] = await Promise.all([
     getAppSettings(),
-    db.trips.toArray(),
-    db.pre.toArray(),
-    db.daily.toArray(),
-    db.places.toArray(),
+    tripUid ? db.trips.where('uid').equals(tripUid).toArray() : db.trips.toArray(),
+    rows<PreExpense>(db.pre),
+    rows<DailyExpense>(db.daily),
+    rows<Place>(db.places),
   ]);
-  const packedDaily: PackedDaily[] = [];
-  for (const d of only(daily)) {
-    const { receipt, id, ...rest } = d;
-    void id;
-    packedDaily.push({ ...rest, receipt: receipt ? await blobToDataUrl(receipt) : undefined });
-  }
-  const packedPlaces: PackedPlace[] = [];
-  for (const p of only(places)) {
-    const { photo, photos, id, ...rest } = p;
-    void id;
-    const all = photos?.length ? photos : photo ? [photo] : [];
-    packedPlaces.push({ ...rest, photos: await Promise.all(all.map(blobToDataUrl)) });
-  }
+  const packedDaily = await Promise.all(
+    daily.map(async ({ receipt, id, ...rest }): Promise<PackedDaily> => {
+      void id;
+      return { ...rest, receipt: receipt ? await blobToDataUrl(receipt) : undefined };
+    }),
+  );
+  const packedPlaces = await Promise.all(
+    places.map(async ({ photo, photos, id, ...rest }): Promise<PackedPlace> => {
+      void id;
+      const all = photos?.length ? photos : photo ? [photo] : [];
+      return { ...rest, photos: await Promise.all(all.map(blobToDataUrl)) };
+    }),
+  );
   const file: BackupFile = {
     app: 'hokkaido-trip',
     version: 2,
     exportedAt: new Date().toISOString(),
     shared: { nameA: app.nameA, notes: app.notes },
-    trips: trips.filter((t) => !tripUid || t.uid === tripUid).map(({ id, ...rest }) => (void id, rest)),
-    pre: only(pre).map(({ id, ...rest }) => (void id, rest)),
+    trips: trips.map(({ id, ...rest }) => (void id, rest)),
+    pre: pre.map(({ id, ...rest }) => (void id, rest)),
     daily: packedDaily,
     places: packedPlaces,
   };
@@ -98,6 +94,7 @@ export interface ImportResult {
   lots: number;
   updated: number; // รายการที่อัปเดตตามที่เพื่อนแก้
   members: number; // สมาชิกใหม่ที่เพิ่มเข้าทริป
+  skipped: number; // รายการในไฟล์ที่ข้อมูลเสีย จึงข้ามไป
 }
 
 const mergeMembers = (mine: Member[] = [], theirs: Member[] = []) => {
@@ -112,35 +109,55 @@ const mergeLots = (mine: RateLot[], theirs: RateLot[] = []) => {
   return { lots: [...mine, ...added], added: added.length };
 };
 
+/** รวมไฟล์สำรอง/อัปเดตเข้าเครื่องนี้
+ *  ขั้น 1 ตรวจข้อมูล + แปลงรูป (เฉพาะรายการที่จะเขียนจริง) · ขั้น 2 เขียนทั้งหมดในทรานแซกชันเดียว
+ *  → ถ้าพังกลางทาง จะไม่มีอะไรถูกเขียนครึ่ง ๆ กลาง ๆ */
 export async function importMerge(text: string, opts: { overwriteSettings: boolean }): Promise<ImportResult> {
-  let data: BackupFile | BackupFileV1;
+  let data: Record<string, unknown>;
   try {
     data = JSON.parse(text);
   } catch {
     throw new Error('ไฟล์นี้ไม่ใช่ไฟล์สำรองที่อ่านได้');
   }
-  if (data?.app !== 'hokkaido-trip' || !Array.isArray(data.pre) || !Array.isArray(data.daily) || !Array.isArray(data.places)) {
-    throw new Error('ไฟล์นี้ไม่ใช่ไฟล์สำรองของแอปนี้');
+  const notOurs = new Error('ไฟล์นี้ไม่ใช่ไฟล์สำรองของแอปนี้');
+  if (!data || data.app !== 'hokkaido-trip') throw notOurs;
+  if (data.version !== 1 && data.version !== 2) {
+    if (typeof data.version === 'number' && data.version > 2) {
+      throw new Error('ไฟล์นี้มาจากแอปรุ่นใหม่กว่า — ต่อเน็ตแล้วปิด/เปิดแอปใหม่ให้แอปอัปเดตก่อน แล้วลองอีกครั้ง');
+    }
+    throw notOurs;
   }
+  if (!Array.isArray(data.pre) || !Array.isArray(data.daily) || !Array.isArray(data.places)) throw notOurs;
 
-  const result: ImportResult = { trips: 0, pre: 0, daily: 0, places: 0, lots: 0, updated: 0, members: 0 };
+  const result: ImportResult = { trips: 0, pre: 0, daily: 0, places: 0, lots: 0, updated: 0, members: 0, skipped: 0 };
   const active = await ensureActiveTrip();
   const localTrips = await db.trips.toArray();
   const tripUids = new Set(localTrips.map((t) => t.uid));
 
+  const tripAdds: Omit<Trip, 'id'>[] = [];
+  const tripUpdates: { id: number; patch: Partial<Trip> }[] = [];
+  let appPatch: Partial<AppSettings> | null = null;
+
   if (data.version === 2) {
-    // ทริป: ทริปใหม่ → เพิ่ม · ทริปที่มีอยู่แล้ว → รวมล็อตแลกเงิน (และเขียนทับค่าอื่นถ้าเลือก)
-    for (const t of data.trips ?? []) {
-      const local = localTrips.find((x) => x.uid === t.uid);
+    const shared = (data.shared ?? {}) as Partial<Shared>;
+    // ทริป: ทริปใหม่ → เพิ่ม · ทริปที่มีอยู่แล้ว → รวมล็อตแลกเงิน/สมาชิก (และเขียนทับค่าอื่นถ้าเลือก)
+    for (const raw of Array.isArray(data.trips) ? data.trips : []) {
+      const t = cleanTrip(raw);
+      if (!t) {
+        result.skipped++;
+        continue;
+      }
       // ไฟล์ก่อนมีระบบสมาชิก → ใช้ 2 คนเดิม (id 'a'/'b' ตรงกับป้ายผู้จ่ายในไฟล์)
-      const incomingMembers: Member[] = t.members?.length
+      const incomingMembers: Member[] = t.members.length
         ? t.members
         : [
-            { id: 'a', name: data.shared?.nameA || 'คนที่ 1' },
-            { id: 'b', name: data.shared?.nameB || 'คนที่ 2' },
+            { id: 'a', name: shared.nameA || 'คนที่ 1' },
+            { id: 'b', name: shared.nameB || 'คนที่ 2' },
           ];
+      const local = localTrips.find((x) => x.uid === t.uid);
       if (!local) {
-        await db.trips.add({ ...t, members: incomingMembers, splitMode: t.splitMode ?? 'shared' });
+        if (tripUids.has(t.uid)) continue; // ซ้ำในไฟล์เดียวกัน
+        tripAdds.push({ ...t, members: incomingMembers });
         tripUids.add(t.uid);
         result.trips++;
         continue;
@@ -150,82 +167,106 @@ export async function importMerge(text: string, opts: { overwriteSettings: boole
       result.lots += added;
       result.members += mem.added;
       const patch: Partial<Trip> = opts.overwriteSettings
-        ? { ...t, rateLots: lots, members: mem.members, splitMode: t.splitMode ?? local.splitMode }
+        ? { ...t, rateLots: lots, members: mem.members }
         : { rateLots: lots, members: mem.members };
-      if (added || mem.added || opts.overwriteSettings) await db.trips.update(local.id!, patch);
+      if (added || mem.added || opts.overwriteSettings) tripUpdates.push({ id: local.id!, patch });
     }
-    if (opts.overwriteSettings && data.shared) {
-      await db.settings.put({ ...(await getAppSettings()), nameA: data.shared.nameA, notes: data.shared.notes });
+    if (opts.overwriteSettings && typeof shared.nameA === 'string') {
+      appPatch = { nameA: shared.nameA || 'ฉัน', notes: typeof shared.notes === 'string' ? shared.notes : '' };
     }
   } else {
     // รุ่น 1: ทุกอย่างเข้าทริปที่เปิดอยู่
-    const s = data.settings ?? {};
-    const { lots, added } = mergeLots(active.rateLots, s.rateLots);
+    const s = (data.settings ?? {}) as Partial<Settings>;
+    const { lots, added } = mergeLots(active.rateLots, cleanLots(s.rateLots));
     result.lots += added;
     const patch: Partial<Trip> = { rateLots: lots };
     if (opts.overwriteSettings) {
+      const days = typeof s.days === 'number' && Number.isInteger(s.days) && s.days >= 1 && s.days <= 60 ? s.days : active.days;
       Object.assign(patch, {
-        tripStart: s.tripStart ?? active.tripStart,
-        days: s.days ?? active.days,
-        rateMode: s.rateMode ?? active.rateMode,
-        fixedRate: s.fixedRate ?? active.fixedRate,
+        tripStart: typeof s.tripStart === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s.tripStart) ? s.tripStart : active.tripStart,
+        days,
+        rateMode: s.rateMode === 'lots' || s.rateMode === 'fixed' ? s.rateMode : active.rateMode,
+        fixedRate: typeof s.fixedRate === 'number' && s.fixedRate > 0 ? s.fixedRate : active.fixedRate,
       });
-      await db.settings.put({ ...(await getAppSettings()), nameA: s.nameA ?? 'ฉัน', notes: s.notes ?? '' });
+      appPatch = { nameA: typeof s.nameA === 'string' && s.nameA ? s.nameA : 'ฉัน', notes: typeof s.notes === 'string' ? s.notes : '' };
     }
-    await db.trips.update(active.id!, patch);
+    tripUpdates.push({ id: active.id!, patch });
   }
 
   // รายการที่อ้างถึงทริปที่ไม่มีอยู่จริง → เข้าทริปที่เปิดอยู่
   const tripOf = (r: { tripUid?: string }) => (r.tripUid && tripUids.has(r.tripUid) ? r.tripUid : active.uid);
-
-  // รายการใหม่ → เพิ่ม · มีอยู่แล้วแต่ของในไฟล์แก้ทีหลัง → แทนที่ (รูปในไฟล์ไม่มี = ใช้รูปเดิม)
+  // มีอยู่แล้วแต่ของในไฟล์แก้ทีหลัง → แทนที่
   const newer = (incoming?: number, local?: number) => (incoming ?? 0) > (local ?? 0);
-
-  const localPre = new Map((await db.pre.toArray()).map((x) => [x.uid, x]));
-  for (const p of data.pre as (Omit<PreExpense, 'id' | 'tripUid'> & { tripUid?: string })[]) {
-    if (!p.uid) continue;
-    const cur = localPre.get(p.uid);
-    if (!cur) {
-      await db.pre.add({ ...p, tripUid: tripOf(p) });
-      result.pre++;
-    } else if (newer(p.updatedAt, cur.updatedAt)) {
-      await db.pre.put({ ...p, id: cur.id, tripUid: cur.tripUid });
-      result.updated++;
-    }
+  function clean<T extends { uid: string; updatedAt?: number }>(rows: unknown[], fn: (v: unknown) => T | null): T[] {
+    const ok = rows.map(fn).filter((x): x is T => !!x);
+    result.skipped += rows.length - ok.length;
+    return newestByUid(ok);
   }
 
-  const localDaily = new Map((await db.daily.toArray()).map((x) => [x.uid, x]));
-  for (const d of data.daily as (Omit<PackedDaily, 'tripUid'> & { tripUid?: string })[]) {
-    if (!d.uid) continue;
+  const pres = clean(data.pre, cleanPre);
+  const dailies = clean(data.daily, cleanDaily);
+  const places = clean(data.places, cleanPlace);
+  // อ่านเฉพาะรายการในเครื่องที่ uid ตรงกับในไฟล์ (ไม่โหลดรูปของรายการอื่น)
+  const [curPre, curDaily, curPlaces] = await Promise.all([
+    db.pre.where('uid').anyOf(pres.map((x) => x.uid)).toArray(),
+    db.daily.where('uid').anyOf(dailies.map((x) => x.uid)).toArray(),
+    db.places.where('uid').anyOf(places.map((x) => x.uid)).toArray(),
+  ]).then(([a, b, c]) => [new Map(a.map((x) => [x.uid, x])), new Map(b.map((x) => [x.uid, x])), new Map(c.map((x) => [x.uid, x]))] as const);
+
+  const preAdd: PreExpense[] = [];
+  const prePut: PreExpense[] = [];
+  for (const p of pres) {
+    const cur = curPre.get(p.uid);
+    if (!cur) preAdd.push({ ...p, tripUid: tripOf(p) });
+    else if (newer(p.updatedAt, cur.updatedAt)) prePut.push({ ...p, id: cur.id, tripUid: cur.tripUid });
+  }
+
+  const dailyAdd: DailyExpense[] = [];
+  const dailyPut: DailyExpense[] = [];
+  for (const d of dailies) {
     const { receipt, ...rest } = d;
-    const cur = localDaily.get(d.uid);
-    if (!cur) {
-      await db.daily.add({ ...rest, tripUid: tripOf(d), receipt: receipt ? await dataUrlToBlob(receipt) : undefined });
-      result.daily++;
-    } else if (newer(d.updatedAt, cur.updatedAt)) {
-      await db.daily.put({ ...rest, id: cur.id, tripUid: cur.tripUid, receipt: receipt ? await dataUrlToBlob(receipt) : cur.receipt });
-      result.updated++;
+    const cur = curDaily.get(d.uid);
+    if (!cur) dailyAdd.push({ ...rest, tripUid: tripOf(d), receipt: await toBlob(receipt) });
+    else if (newer(d.updatedAt, cur.updatedAt)) {
+      dailyPut.push({ ...rest, id: cur.id, tripUid: cur.tripUid, receipt: (await toBlob(receipt)) ?? cur.receipt });
     }
   }
 
-  const localPlaces = new Map((await db.places.toArray()).map((x) => [x.uid, x]));
-  for (const p of data.places as (Omit<PackedPlace, 'tripUid'> & { tripUid?: string })[]) {
-    if (!p.uid) continue;
-    const { photo, photos, ...rest } = p;
-    const blobs = await unpackPhotos({ photo, photos });
-    const cur = localPlaces.get(p.uid);
-    if (!cur) {
-      await db.places.add({ ...rest, tripUid: tripOf(p), photos: blobs ?? [] });
-      result.places++;
-    } else if (newer(p.updatedAt, cur.updatedAt)) {
-      await db.places.put({ ...rest, id: cur.id, tripUid: cur.tripUid, photos: blobs ?? cur.photos ?? (cur.photo ? [cur.photo] : []) });
-      result.updated++;
+  const placeAdd: Place[] = [];
+  const placePut: Place[] = [];
+  const blobsOf = async (list?: string[]) => (list ? (await Promise.all(list.map(toBlob))).filter((b): b is Blob => !!b) : undefined);
+  for (const p of places) {
+    const { photos, ...rest } = p;
+    const cur = curPlaces.get(p.uid);
+    if (!cur) placeAdd.push({ ...rest, tripUid: tripOf(p), photos: (await blobsOf(photos)) ?? [] });
+    else if (newer(p.updatedAt, cur.updatedAt)) {
+      const blobs = await blobsOf(photos);
+      const keep = cur.photos?.length ? cur.photos : cur.photo ? [cur.photo] : [];
+      placePut.push({ ...rest, id: cur.id, tripUid: cur.tripUid, photos: blobs ?? keep, photoCredits: blobs ? rest.photoCredits : cur.photoCredits });
     }
   }
+
+  await db.transaction('rw', [db.trips, db.settings, db.pre, db.daily, db.places], async () => {
+    if (tripAdds.length) await db.trips.bulkAdd(tripAdds as Trip[]);
+    for (const u of tripUpdates) await db.trips.update(u.id, u.patch);
+    if (appPatch) await db.settings.put({ ...(await getAppSettings()), ...appPatch });
+    if (preAdd.length) await db.pre.bulkAdd(preAdd);
+    if (prePut.length) await db.pre.bulkPut(prePut);
+    if (dailyAdd.length) await db.daily.bulkAdd(dailyAdd);
+    if (dailyPut.length) await db.daily.bulkPut(dailyPut);
+    if (placeAdd.length) await db.places.bulkAdd(placeAdd);
+    if (placePut.length) await db.places.bulkPut(placePut);
+  });
+  result.pre = preAdd.length;
+  result.daily = dailyAdd.length;
+  result.places = placeAdd.length;
+  result.updated = prePut.length + dailyPut.length + placePut.length;
   return result;
 }
 
 export async function wipeAll(): Promise<void> {
-  await Promise.all([db.pre.clear(), db.daily.clear(), db.places.clear(), db.settings.clear(), db.trips.clear(), db.weather.clear()]);
+  await db.transaction('rw', [db.pre, db.daily, db.places, db.settings, db.trips, db.weather], async () => {
+    await Promise.all([db.pre.clear(), db.daily.clear(), db.places.clear(), db.settings.clear(), db.trips.clear(), db.weather.clear()]);
+  });
   await ensureActiveTrip();
 }

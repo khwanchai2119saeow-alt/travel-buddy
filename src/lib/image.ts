@@ -91,7 +91,8 @@ export function downloadBlob(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
-/** แชร์ไฟล์ผ่านเมนูแชร์ของมือถือ (LINE ฯลฯ) ถ้าไม่รองรับจะคืน false */
+/** แชร์ไฟล์ผ่านเมนูแชร์ของมือถือ (LINE ฯลฯ)
+ *  true = เปิดเมนูแชร์แล้ว (รวมกรณีผู้ใช้กดยกเลิกเอง — ไม่ต้องดาวน์โหลดแทน) · false = แชร์ไม่ได้ ให้ดาวน์โหลดแทน */
 export async function shareFile(file: File, title: string): Promise<boolean> {
   try {
     const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
@@ -99,8 +100,9 @@ export async function shareFile(file: File, title: string): Promise<boolean> {
       await nav.share({ files: [file], title });
       return true;
     }
-  } catch {
-    /* ผู้ใช้ยกเลิก หรือไม่รองรับ */
+  } catch (e) {
+    if ((e as Error)?.name === 'AbortError') return true; // ผู้ใช้ปิดเมนูแชร์เอง
+    /* NotAllowedError (รอนานเกินจนเบราว์เซอร์ไม่ให้แชร์) ฯลฯ → ดาวน์โหลดแทน */
   }
   return false;
 }

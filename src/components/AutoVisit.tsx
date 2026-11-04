@@ -23,10 +23,22 @@ export default function AutoVisit() {
     let watchId: number | null = null;
     let timer: ReturnType<typeof setInterval> | null = null;
     let last: GeolocationPosition | null = null;
+    let checking = false; // ตำแหน่งจาก GPS กับตัวตั้งเวลาอาจมาพร้อมกัน → ตรวจทีละครั้ง
 
     async function onPosition(pos: GeolocationPosition) {
       last = pos;
-      if (pos.coords.accuracy > MAX_ACCURACY) return;
+      if (pos.coords.accuracy > MAX_ACCURACY || checking) return;
+      checking = true;
+      try {
+        await check(pos);
+      } catch {
+        /* อ่าน/เขียนฐานข้อมูลไม่ได้ชั่วคราว — รอตำแหน่งถัดไป */
+      } finally {
+        checking = false;
+      }
+    }
+
+    async function check(pos: GeolocationPosition) {
       const here = { lat: pos.coords.latitude, lng: pos.coords.longitude };
       const candidates = await db.places
         .where('tripUid')

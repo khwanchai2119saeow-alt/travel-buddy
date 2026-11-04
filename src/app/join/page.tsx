@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { decodeInvite, joinTrip, type InvitePayload } from '@/lib/invite';
 import { countryOf } from '@/lib/country';
 import { tripRangeText } from '@/lib/format';
-import { PageHeader } from '@/components/ui';
+import { PageHeader, useSingleFlight } from '@/components/ui';
 
 export default function JoinPage() {
   const router = useRouter();
@@ -15,6 +15,7 @@ export default function JoinPage() {
   const [newName, setNewName] = useState('');
   const [standalone, setStandalone] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [run, joining] = useSingleFlight();
 
   useEffect(() => {
     const read = () => {
@@ -29,12 +30,13 @@ export default function JoinPage() {
     return () => window.removeEventListener('hashchange', read);
   }, []);
 
-  async function join() {
-    if (!p) return;
-    if (me === 'new' && !newName.trim()) return;
-    await joinTrip(p, me === 'new' ? { newName: newName.trim() } : me);
-    router.push('/');
-  }
+  const join = () =>
+    run(async () => {
+      if (!p) return;
+      if (me === 'new' && !newName.trim()) return;
+      await joinTrip(p, me === 'new' ? { newName: newName.trim() } : me);
+      router.push('/');
+    });
 
   async function copyCode() {
     try {
@@ -99,8 +101,8 @@ export default function JoinPage() {
         </div>
         {me === 'new' && <input className="input" placeholder="ชื่อของคุณ" value={newName} onChange={(e) => setNewName(e.target.value)} autoFocus />}
 
-        <button className="btn-primary w-full !py-3" onClick={join} disabled={!me || (me === 'new' && !newName.trim())}>
-          เข้าร่วมทริปนี้
+        <button className="btn-primary w-full !py-3" onClick={join} disabled={joining || !me || (me === 'new' && !newName.trim())}>
+          {joining ? 'กำลังเข้าร่วม…' : 'เข้าร่วมทริปนี้'}
         </button>
         <p className="px-1 text-[12px] text-ios-secondary">
           เข้าร่วมแล้วจะเห็นข้อมูลทริปและรายชื่อ ส่วนค่าใช้จ่ายและแผนเที่ยวของเพื่อน ให้เพื่อนกด “ส่งอัปเดตให้กลุ่ม” แล้วคุณกด “รับอัปเดตจากเพื่อน”

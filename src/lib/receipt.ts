@@ -84,6 +84,9 @@ function pickAmount(hits: Hit[]): number {
   return list[list.length - 1].value;
 }
 
+/** OCR ภาษาญี่ปุ่น/จีนมักเว้นวรรคระหว่างตัวอักษร (コ ー ヒ ー) → ต่อกันให้เป็นคำ (เว้นวรรคระหว่างคำอังกฤษคงไว้) */
+export const compactCjk = (s: string) => s.replace(/([^\x00-\x7F])\s+(?=[^\x00-\x7F])/g, '$1');
+
 const splitLines = (raw: string) =>
   raw
     .normalize('NFKC') // ￥→¥ , ตัวเลขเต็มความกว้าง→ปกติ
@@ -154,7 +157,7 @@ export function parseItems(rawText: string, country: Country = 'JP'): ReceiptIte
       if (qty === 1 && /^\d{1,2}$/.test(n)) qty = parseInt(n, 10) || 1;
       name = name.slice(0, tail.index).trim();
     }
-    name = name
+    name = compactCjk(name)
       .replace(/^[\d\s]{4,}/, '') // รหัสสินค้า/บาร์โค้ดหน้าชื่อ
       .replace(/^[*※・\-\s]+/, '')
       .replace(/[\s.・…]+$/, '')

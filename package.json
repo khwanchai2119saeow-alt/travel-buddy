@@ -9,7 +9,8 @@
     "postbuild": "node scripts/postbuild-sw.mjs",
     "preview": "npx serve out -l 3000",
     "typecheck": "tsc --noEmit",
-    "postinstall": "node scripts/copy-ocr-assets.mjs"
+    "postinstall": "node scripts/copy-ocr-assets.mjs",
+    "test": "tsc -p tests/tsconfig.json && node tests/logic.test.cjs"
   },
   "dependencies": {
     "dexie": "^4.0.1",

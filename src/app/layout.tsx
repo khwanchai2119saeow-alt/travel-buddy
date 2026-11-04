@@ -4,6 +4,7 @@ import BottomNav from '@/components/BottomNav';
 import PwaRegister from '@/components/PwaRegister';
 import NavHistory from '@/components/NavHistory';
 import AutoVisit from '@/components/AutoVisit';
+import ErrorToast from '@/components/ErrorToast';
 
 const base = process.env.NEXT_PUBLIC_BASE_PATH || '';
 
@@ -37,6 +38,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <PwaRegister />
         <NavHistory />
         <AutoVisit />
+        <ErrorToast />
         <main className="mx-auto min-h-screen max-w-xl">{children}</main>
         <BottomNav />
       </body>

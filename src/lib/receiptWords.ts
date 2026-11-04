@@ -2,6 +2,7 @@
 // จับคู่แบบ "มีคำนี้อยู่ในชื่อสินค้า" คำยาวก่อน เช่น 味噌ラーメン ชนะ ラーメン
 import type { DayCategory } from './db';
 import type { Country } from './country';
+import { compactCjk } from './receipt';
 
 type Entry = [ja: string, th: string];
 
@@ -131,7 +132,7 @@ export interface ItemGloss {
 
 /** แปลชื่อสินค้าจากพจนานุกรม (ได้เฉพาะคำที่รู้จัก) คืน null ถ้าไม่รู้จักเลย */
 export function glossItem(name: string, country: Country = 'JP'): ItemGloss | null {
-  let rest = name.normalize('NFKC');
+  let rest = compactCjk(name.normalize('NFKC'));
   const parts: string[] = [];
   let cat: DayCategory | undefined;
   for (const e of DICTS[country]) {

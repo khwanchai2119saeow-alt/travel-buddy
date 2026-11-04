@@ -94,7 +94,23 @@ export default function TripPage() {
   }
   const allOpen = daysWithPlaces.length > 0 && daysWithPlaces.every((d) => activeOpen.has(d));
   useEffect(() => setOpenDays(null), [settings.uid]); // สลับทริป → ใช้ค่าของทริปนั้น
-  const countByDay = (d: number) => allPlaces.filter((p) => p.day === d).length;
+  // นับล่วงหน้าครั้งเดียว (เดิมนับใหม่ทุกแถวทุกครั้งที่วาด)
+  const { countByDay, doneByDay, spotNoOf } = useMemo(() => {
+    const count = new Map<number, number>();
+    const done = new Map<number, number>();
+    const spotNo = new Map<string, number>();
+    const spotsSeen = new Map<number, number>();
+    for (const p of sorted) {
+      count.set(p.day, (count.get(p.day) ?? 0) + 1);
+      if (p.visited) done.set(p.day, (done.get(p.day) ?? 0) + 1);
+      if (p.kind === 'spot') {
+        const n = (spotsSeen.get(p.day) ?? 0) + 1;
+        spotsSeen.set(p.day, n);
+        spotNo.set(p.uid, n);
+      }
+    }
+    return { countByDay: (d: number) => count.get(d) ?? 0, doneByDay: (d: number) => done.get(d) ?? 0, spotNoOf: (uid: string) => spotNo.get(uid) ?? 0 };
+  }, [sorted]);
 
   function openAdd() {
     setEditing(null);
@@ -254,18 +270,14 @@ export default function TripPage() {
         {shown.map((p, idx) => {
           const prevDay = idx > 0 ? shown[idx - 1].day : -1;
           const spent = spentByPlace.get(p.uid) ?? 0;
-          let spotNo = 0;
-          for (const q of shown) {
-            if (q.day === p.day && q.kind === 'spot') spotNo++;
-            if (q.uid === p.uid) break;
-          }
+          const spotNo = spotNoOf(p.uid);
           return (
             <div key={p.uid}>
               {selectedDay === 0 && p.day !== prevDay && (
                 <DayHeader
                   label={dayLabel(settings, p.day)}
-                  total={shown.filter((x) => x.day === p.day).length}
-                  done={shown.filter((x) => x.day === p.day && x.visited).length}
+                  total={countByDay(p.day)}
+                  done={doneByDay(p.day)}
                   open={activeOpen.has(p.day)}
                   onToggle={() => toggleDay(p.day)}
                 />
